@@ -1,5 +1,5 @@
 /*
- *  drivers/cpufreq/cpufreq_hybrid.c
+ *  drivers/cpufreq/cpufreq_hotplug.c
  *
  *  Copyright (C)  2001 Russell King
  *            (C)  2003 Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>.
@@ -40,24 +40,17 @@
 #define MIN_FREQUENCY_UP_THRESHOLD          (21)
 #define MAX_FREQUENCY_UP_THRESHOLD          (100)
 
-#define DEF_CPU_DOWN_THRESHOLD          (80)
-#define MICRO_CPU_DOWN_THRESHOLD        (80)
-#define MIN_CPU_DOWN_THRESHOLD          (60)
-#define MAX_CPU_DOWN_THRESHOLD          (85)
+#define DEF_CPU_DOWN_DIFFERENTIAL   (10)
+#define MICRO_CPU_DOWN_DIFFERENTIAL (10)
+#define MIN_CPU_DOWN_DIFFERENTIAL   (0)
+#define MAX_CPU_DOWN_DIFFERENTIAL   (30)
 
-#define LOAD_CRITICAL_GRADE             (10)
-#define LOAD_HIGH_GRADE                 (5)
-#define LOAD_WARNING_GRADE              (0)
-#define LOAD_MEDIUM_GRADE               (-10)
-#define LOAD_LIGHT_GRADE                (-20)
+#define DEF_CPU_UP_THRESHOLD        (90)
+#define MICRO_CPU_UP_THRESHOLD      (90)
+#define MIN_CPU_UP_THRESHOLD        (80)
+#define MAX_CPU_UP_THRESHOLD        (100)
 
-#define LOAD_CRITICAL           (100)
-#define LOAD_HIGH               (90)
-#define LOAD_WARNING            (80)
-#define LOAD_MEDIUM             (50)
-#define LOAD_LIGHT              (0)
-
-#define CPU_UP_BOUND            (100)
+#define CPU_UP_AVG_TIMES        (10)
 #define CPU_DOWN_AVG_TIMES      (50)
 
 //#define DEBUG_LOG
@@ -84,24 +77,24 @@ static void do_dbs_timer(struct work_struct *work);
 static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 				unsigned int event);
 
-#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_HYBRID
+#ifndef CONFIG_CPU_FREQ_DEFAULT_GOV_HOTPLUG
 static
 #endif
-struct cpufreq_governor cpufreq_gov_hybrid = {
-       .name                   = "hybrid",
+struct cpufreq_governor cpufreq_gov_hotplug = {
+       .name                   = "hotplug",
        .governor               = cpufreq_governor_dbs,
        .max_transition_latency = TRANSITION_LATENCY_LIMIT,
        .owner                  = THIS_MODULE,
 };
 
-static int g_disable_hotplug = false;
-
 #ifdef CONFIG_SMP
 
 static int g_next_hp_action = 0;
-static int g_cpu_up_sum_grade = 0;
 
-static long g_cpu_down_sum_load_freq = 0;
+static long g_cpu_up_sum_load = 0;
+static int g_cpu_up_count = 0;
+
+static long g_cpu_down_sum_load = 0;
 static int g_cpu_down_count = 0;
 
 static void hp_work_handler(struct work_struct *work);
@@ -109,9 +102,7 @@ static struct delayed_work hp_work;
 
 #endif
 
-static int g_sum_load = 0;
-static int g_available_cpu_num = 0;
-static int g_limit_cpu_num = 0;
+static int cpus_sum_load = 0;
 
 /* Sampling types */
 enum {DBS_NORMAL_SAMPLE, DBS_SUB_SAMPLE};
@@ -137,9 +128,10 @@ struct cpu_dbs_info_s {
 	 */
 	struct mutex timer_mutex;
 };
-static DEFINE_PER_CPU(struct cpu_dbs_info_s, hb_cpu_dbs_info);
+static DEFINE_PER_CPU(struct cpu_dbs_info_s, hp_cpu_dbs_info);
 
 static unsigned int dbs_enable;	/* number of CPUs using this policy */
+static unsigned int dbs_ignore = 1;
 
 /*
  * dbs_mutex protects dbs_enable in governor start/stop.
@@ -151,7 +143,7 @@ static DEFINE_MUTEX(dbs_mutex);
  */
 static DEFINE_MUTEX(hp_mutex);
 
-static DEFINE_MUTEX(hp_onoff_mutex);
+DEFINE_MUTEX(hp_onoff_mutex);
 
 static struct dbs_tuners {
     unsigned int sampling_rate;
@@ -161,38 +153,26 @@ static struct dbs_tuners {
     unsigned int sampling_down_factor;
     unsigned int powersave_bias;
     unsigned int io_is_busy;
-    unsigned int cpu_down_threshold;
-    int load_critical_grade;
-    int load_high_grade;
-    int load_warning_grade;
-    int load_medium_grade;
-    int load_light_grade;
-    unsigned int load_critical;
-    unsigned int load_high;
-    unsigned int load_warning;
-    unsigned int load_medium;
-    unsigned int load_light;
-    unsigned int cpu_up_bound;
+    unsigned int cpu_up_threshold;
+    unsigned int cpu_down_differential;
+    unsigned int cpu_up_avg_times;
     unsigned int cpu_down_avg_times;
+    unsigned int cpu_num_limit;
+    unsigned int cpu_num_base;
+    unsigned int cpu_hotplug_disable;
 } dbs_tuners_ins = {
     .up_threshold = DEF_FREQUENCY_UP_THRESHOLD,
     .sampling_down_factor = DEF_SAMPLING_DOWN_FACTOR,
     .down_differential = DEF_FREQUENCY_DOWN_DIFFERENTIAL,
     .ignore_nice = 0,
     .powersave_bias = 0,
-    .cpu_down_threshold = DEF_CPU_DOWN_THRESHOLD,
-    .load_critical_grade = LOAD_CRITICAL_GRADE,
-    .load_high_grade = LOAD_HIGH_GRADE,
-    .load_warning_grade = LOAD_WARNING_GRADE,
-    .load_medium_grade = LOAD_MEDIUM_GRADE,
-    .load_light_grade = LOAD_LIGHT_GRADE,
-    .load_critical = LOAD_CRITICAL,
-    .load_high = LOAD_HIGH,
-    .load_warning = LOAD_WARNING,
-    .load_medium = LOAD_MEDIUM,
-    .load_light = LOAD_LIGHT,
-    .cpu_up_bound = CPU_UP_BOUND,
+    .cpu_up_threshold = DEF_CPU_UP_THRESHOLD,
+    .cpu_down_differential = DEF_CPU_DOWN_DIFFERENTIAL,
+    .cpu_up_avg_times = CPU_UP_AVG_TIMES,
     .cpu_down_avg_times = CPU_DOWN_AVG_TIMES,
+    .cpu_num_limit = 1,
+    .cpu_num_base = 1,
+    .cpu_hotplug_disable = 1,
 };
 
 static inline u64 get_cpu_idle_time_jiffy(unsigned int cpu, u64 *wall)
@@ -252,7 +232,7 @@ static unsigned int powersave_bias_target(struct cpufreq_policy *policy,
 	unsigned int freq_hi, freq_lo;
 	unsigned int index = 0;
 	unsigned int jiffies_total, jiffies_hi, jiffies_lo;
-	struct cpu_dbs_info_s *dbs_info = &per_cpu(hb_cpu_dbs_info,
+	struct cpu_dbs_info_s *dbs_info = &per_cpu(hp_cpu_dbs_info,
 						   policy->cpu);
 
 	if (!dbs_info->freq_table) {
@@ -294,18 +274,18 @@ static unsigned int powersave_bias_target(struct cpufreq_policy *policy,
 	return freq_hi;
 }
 
-static void hybrid_powersave_bias_init_cpu(int cpu)
+static void hotplug_powersave_bias_init_cpu(int cpu)
 {
-	struct cpu_dbs_info_s *dbs_info = &per_cpu(hb_cpu_dbs_info, cpu);
+	struct cpu_dbs_info_s *dbs_info = &per_cpu(hp_cpu_dbs_info, cpu);
 	dbs_info->freq_table = cpufreq_frequency_get_table(cpu);
 	dbs_info->freq_lo = 0;
 }
 
-static void hybrid_powersave_bias_init(void)
+static void hotplug_powersave_bias_init(void)
 {
 	int i;
 	for_each_online_cpu(i) {
-		hybrid_powersave_bias_init_cpu(i);
+		hotplug_powersave_bias_init_cpu(i);
 	}
 }
 
@@ -319,41 +299,28 @@ static ssize_t show_sampling_rate_min(struct kobject *kobj,
 
 define_one_global_ro(sampling_rate_min);
 
-/* cpufreq_hybrid Governor Tunables */
-#define show_one_unsigned(file_name, object)					\
+/* cpufreq_hotplug Governor Tunables */
+#define show_one(file_name, object)					\
 static ssize_t show_##file_name						\
 (struct kobject *kobj, struct attribute *attr, char *buf)              \
 {									\
 	return sprintf(buf, "%u\n", dbs_tuners_ins.object);		\
 }
 
-#define show_one_signed(file_name, object)					\
-static ssize_t show_##file_name						\
-(struct kobject *kobj, struct attribute *attr, char *buf)              \
-{									\
-	return sprintf(buf, "%d\n", dbs_tuners_ins.object);		\
-}
-
-show_one_unsigned(sampling_rate, sampling_rate);
-show_one_unsigned(io_is_busy, io_is_busy);
-show_one_unsigned(up_threshold, up_threshold);
-show_one_unsigned(down_differential, down_differential);
-show_one_unsigned(sampling_down_factor, sampling_down_factor);
-show_one_unsigned(ignore_nice_load, ignore_nice);
-show_one_unsigned(powersave_bias, powersave_bias);
-show_one_unsigned(cpu_down_threshold, cpu_down_threshold);
-show_one_signed(load_critical_grade, load_critical_grade);
-show_one_signed(load_high_grade, load_high_grade);
-show_one_signed(load_warning_grade, load_warning_grade);
-show_one_signed(load_medium_grade, load_medium_grade);
-show_one_signed(load_light_grade, load_light_grade);
-show_one_unsigned(load_critical, load_critical);
-show_one_unsigned(load_high, load_high);
-show_one_unsigned(load_warning, load_warning);
-show_one_unsigned(load_medium, load_medium);
-show_one_unsigned(load_light, load_light);
-show_one_unsigned(cpu_up_bound, cpu_up_bound);
-show_one_unsigned(cpu_down_avg_times, cpu_down_avg_times);
+show_one(sampling_rate, sampling_rate);
+show_one(io_is_busy, io_is_busy);
+show_one(up_threshold, up_threshold);
+show_one(down_differential, down_differential);
+show_one(sampling_down_factor, sampling_down_factor);
+show_one(ignore_nice_load, ignore_nice);
+show_one(powersave_bias, powersave_bias);
+show_one(cpu_up_threshold, cpu_up_threshold);
+show_one(cpu_down_differential, cpu_down_differential);
+show_one(cpu_up_avg_times, cpu_up_avg_times);
+show_one(cpu_down_avg_times, cpu_down_avg_times);
+show_one(cpu_num_limit, cpu_num_limit);
+show_one(cpu_num_base, cpu_num_base);
+show_one(cpu_hotplug_disable, cpu_hotplug_disable);
 
 /**
  * update_sampling_rate - update sampling rate effective immediately if needed.
@@ -362,7 +329,7 @@ show_one_unsigned(cpu_down_avg_times, cpu_down_avg_times);
  * If new rate is smaller than the old, simply updaing
  * dbs_tuners_int.sampling_rate might not be appropriate. For example,
  * if the original sampling_rate was 1 second and the requested new sampling
- * rate is 10 ms because the user needs immediate reaction from hybrid
+ * rate is 10 ms because the user needs immediate reaction from hotplug
  * governor, but not sure if higher frequency will be required or not,
  * then, the governor may change the sampling rate too late; up to 1 second
  * later. Thus, if we are reducing the sampling rate, we need to make the
@@ -383,7 +350,7 @@ static void update_sampling_rate(unsigned int new_rate)
 		policy = cpufreq_cpu_get(cpu);
 		if (!policy)
 			continue;
-		dbs_info = &per_cpu(hb_cpu_dbs_info, policy->cpu);
+		dbs_info = &per_cpu(hp_cpu_dbs_info, policy->cpu);
 		cpufreq_cpu_put(policy);
 
 		mutex_lock(&dbs_info->timer_mutex);
@@ -480,7 +447,7 @@ static ssize_t store_sampling_down_factor(struct kobject *a,
 	/* Reset down sampling multiplier in case it was active */
 	for_each_online_cpu(j) {
 		struct cpu_dbs_info_s *dbs_info;
-		dbs_info = &per_cpu(hb_cpu_dbs_info, j);
+		dbs_info = &per_cpu(hp_cpu_dbs_info, j);
 		dbs_info->rate_mult = 1;
 	}
 	return count;
@@ -509,7 +476,7 @@ static ssize_t store_ignore_nice_load(struct kobject *a, struct attribute *b,
 	/* we need to re-evaluate prev_cpu_idle */
 	for_each_online_cpu(j) {
 		struct cpu_dbs_info_s *dbs_info;
-		dbs_info = &per_cpu(hb_cpu_dbs_info, j);
+		dbs_info = &per_cpu(hp_cpu_dbs_info, j);
 		dbs_info->prev_cpu_idle = get_cpu_idle_time(j,
 						&dbs_info->prev_cpu_wall);
 		if (dbs_tuners_ins.ignore_nice)
@@ -533,144 +500,48 @@ static ssize_t store_powersave_bias(struct kobject *a, struct attribute *b,
 		input = 1000;
 
 	dbs_tuners_ins.powersave_bias = input;
-	hybrid_powersave_bias_init();
+	hotplug_powersave_bias_init();
 	return count;
 }
 
-static ssize_t store_cpu_down_threshold(struct kobject *a, struct attribute *b,
+static ssize_t store_cpu_up_threshold(struct kobject *a, struct attribute *b,
 				    const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	if (ret != 1 || input > MAX_CPU_DOWN_THRESHOLD ||
-		input < MIN_CPU_DOWN_THRESHOLD) {
+	if (ret != 1 || input > MAX_CPU_UP_THRESHOLD ||
+		input < MIN_CPU_UP_THRESHOLD) {
 		return -EINVAL;
 	}
-	dbs_tuners_ins.cpu_down_threshold = input;
+	dbs_tuners_ins.cpu_up_threshold = input;
 	return count;
 }
 
-static ssize_t store_load_critical_grade(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	int input;
-	int ret;
-	ret = sscanf(buf, "%d", &input);
-
-	dbs_tuners_ins.load_critical_grade = input;
-	return count;
-}
-
-static ssize_t store_load_high_grade(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	int input;
-	int ret;
-	ret = sscanf(buf, "%d", &input);
-
-	dbs_tuners_ins.load_high_grade = input;
-	return count;
-}
-
-static ssize_t store_load_warning_grade(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	int input;
-	int ret;
-	ret = sscanf(buf, "%d", &input);
-
-	dbs_tuners_ins.load_warning_grade = input;
-	return count;
-}
-
-static ssize_t store_load_medium_grade(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	int input;
-	int ret;
-	ret = sscanf(buf, "%d", &input);
-
-	dbs_tuners_ins.load_medium_grade = input;
-	return count;
-}
-
-static ssize_t store_load_light_grade(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	int input;
-	int ret;
-	ret = sscanf(buf, "%d", &input);
-
-	dbs_tuners_ins.load_light_grade = input;
-	return count;
-}
-
-static ssize_t store_load_critical(struct kobject *a, struct attribute *b,
+static ssize_t store_cpu_down_differential(struct kobject *a, struct attribute *b,
 				    const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	dbs_tuners_ins.load_critical = input;
+	if (ret != 1 || input > MAX_CPU_DOWN_DIFFERENTIAL ||
+		input < MIN_CPU_DOWN_DIFFERENTIAL) {
+		return -EINVAL;
+	}
+	dbs_tuners_ins.cpu_down_differential = input;
 	return count;
 }
 
-
-static ssize_t store_load_high(struct kobject *a, struct attribute *b,
+static ssize_t store_cpu_up_avg_times(struct kobject *a, struct attribute *b,
 				    const char *buf, size_t count)
 {
 	unsigned int input;
 	int ret;
 	ret = sscanf(buf, "%u", &input);
 
-	dbs_tuners_ins.load_high = input;
-	return count;
-}
-
-static ssize_t store_load_warning(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	dbs_tuners_ins.load_warning = input;
-	return count;
-}
-
-static ssize_t store_load_medium(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	dbs_tuners_ins.load_medium = input;
-	return count;
-}
-
-static ssize_t store_load_light(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	dbs_tuners_ins.load_light = input;
-	return count;
-}
-
-static ssize_t store_cpu_up_bound(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	dbs_tuners_ins.cpu_up_bound = input;
+	dbs_tuners_ins.cpu_up_avg_times = input;
 	return count;
 }
 
@@ -685,6 +556,39 @@ static ssize_t store_cpu_down_avg_times(struct kobject *a, struct attribute *b,
 	return count;
 }
 
+static ssize_t store_cpu_num_limit(struct kobject *a, struct attribute *b,
+				    const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+	ret = sscanf(buf, "%u", &input);
+
+	dbs_tuners_ins.cpu_num_limit = input;
+	return count;
+}
+
+static ssize_t store_cpu_num_base(struct kobject *a, struct attribute *b,
+				    const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+	ret = sscanf(buf, "%u", &input);
+
+	dbs_tuners_ins.cpu_num_base = input;
+	return count;
+}
+
+static ssize_t store_cpu_hotplug_disable(struct kobject *a, struct attribute *b,
+				    const char *buf, size_t count)
+{
+	unsigned int input;
+	int ret;
+	ret = sscanf(buf, "%u", &input);
+
+	dbs_tuners_ins.cpu_hotplug_disable = input;
+	return count;
+}
+
 define_one_global_rw(sampling_rate);
 define_one_global_rw(io_is_busy);
 define_one_global_rw(up_threshold);
@@ -692,19 +596,13 @@ define_one_global_rw(down_differential);
 define_one_global_rw(sampling_down_factor);
 define_one_global_rw(ignore_nice_load);
 define_one_global_rw(powersave_bias);
-define_one_global_rw(cpu_down_threshold);
-define_one_global_rw(load_critical_grade);
-define_one_global_rw(load_high_grade);
-define_one_global_rw(load_warning_grade);
-define_one_global_rw(load_medium_grade);
-define_one_global_rw(load_light_grade);
-define_one_global_rw(load_critical);
-define_one_global_rw(load_high);
-define_one_global_rw(load_warning);
-define_one_global_rw(load_medium);
-define_one_global_rw(load_light);
-define_one_global_rw(cpu_up_bound);
+define_one_global_rw(cpu_up_threshold);
+define_one_global_rw(cpu_down_differential);
+define_one_global_rw(cpu_up_avg_times);
 define_one_global_rw(cpu_down_avg_times);
+define_one_global_rw(cpu_num_limit);
+define_one_global_rw(cpu_num_base);
+define_one_global_rw(cpu_hotplug_disable);
 
 static struct attribute *dbs_attributes[] = {
     &sampling_rate_min.attr,
@@ -715,25 +613,19 @@ static struct attribute *dbs_attributes[] = {
     &ignore_nice_load.attr,
     &powersave_bias.attr,
     &io_is_busy.attr,
-    &cpu_down_threshold.attr,
-    &load_critical_grade.attr,
-    &load_high_grade.attr,
-    &load_warning_grade.attr,
-    &load_medium_grade.attr,
-    &load_light_grade.attr,
-    &load_critical.attr,
-    &load_high.attr,
-    &load_warning.attr,
-    &load_medium.attr,
-    &load_light.attr,
-    &cpu_up_bound.attr,
+    &cpu_up_threshold.attr,
+    &cpu_down_differential.attr,
+    &cpu_up_avg_times.attr,
     &cpu_down_avg_times.attr,
+    &cpu_num_limit.attr,
+    &cpu_num_base.attr,
+    &cpu_hotplug_disable.attr,
     NULL
 };
 
 static struct attribute_group dbs_attr_group = {
 	.attrs = dbs_attributes,
-	.name = "hybrid",
+	.name = "hotplug",
 };
 
 /************************** sysfs end ************************/
@@ -743,70 +635,75 @@ static void dbs_freq_increase(struct cpufreq_policy *p, unsigned int freq)
 	if (dbs_tuners_ins.powersave_bias)
 		freq = powersave_bias_target(p, freq, CPUFREQ_RELATION_H);
 	else if (p->cur == p->max)
-		return;
+	{
+		if (dbs_ignore == 0)
+			dbs_ignore = 1;
+		else
+			return;
+	}
 
 	__cpufreq_driver_target(p, freq, dbs_tuners_ins.powersave_bias ?
 			CPUFREQ_RELATION_L : CPUFREQ_RELATION_H);
 }
 
-void disable_hotplug_policy(bool disable, int limit_cpu_num)
+void hp_disable_cpu_hp(int disable)
 {
 	mutex_lock(&hp_mutex);
-	if (disable) {
-		g_disable_hotplug = true;
-		printk("cpufreq_hybrid: disable hotplug policy\n");
-	}
-	else {
-		g_disable_hotplug = false;
-		printk("cpufreq_hybrid: enable hotplug policy\n");
-	}
-
-	g_limit_cpu_num = limit_cpu_num;
+	dbs_tuners_ins.cpu_hotplug_disable = disable;
 	mutex_unlock(&hp_mutex);
 }
-EXPORT_SYMBOL(disable_hotplug_policy);
+EXPORT_SYMBOL(hp_disable_cpu_hp);
+
+void hp_limited_cpu_num(int num)
+{
+	mutex_lock(&hp_mutex);
+	dbs_tuners_ins.cpu_num_limit = num;
+	mutex_unlock(&hp_mutex);
+}
+EXPORT_SYMBOL(hp_limited_cpu_num);
+
+void hp_based_cpu_num(int num)
+{
+	mutex_lock(&hp_mutex);
+	dbs_tuners_ins.cpu_num_base = num;
+	mutex_unlock(&hp_mutex);
+}
+EXPORT_SYMBOL(hp_based_cpu_num);
 
 #ifdef CONFIG_SMP
-static int hb_check_grade(int load)
-{
-	int grade = 0;
-
-	if (load >= dbs_tuners_ins.load_critical)
-		grade = dbs_tuners_ins.load_critical_grade;
-	else if (load >= dbs_tuners_ins.load_high)
-		grade = dbs_tuners_ins.load_high_grade;
-	else if (load >= dbs_tuners_ins.load_warning)
-		grade = dbs_tuners_ins.load_warning_grade;
-	else if (load >= dbs_tuners_ins.load_medium)
-		grade = dbs_tuners_ins.load_medium_grade;
-	else if (load >= dbs_tuners_ins.load_light)
-		grade = dbs_tuners_ins.load_light_grade;
-	else
-		grade = 0;
-
-	#ifdef DEBUG_LOG
-		printk("hb_check_grade: load = %d, grade = %d\n", load, grade);
-	#endif
-
-	return grade;
-}
 
 static void hp_work_handler(struct work_struct *work)
 {
 	if (mutex_trylock(&hp_onoff_mutex))
 	{
-		if (g_next_hp_action)
+		if (!dbs_tuners_ins.cpu_hotplug_disable)
 		{
-			printk("hp_work_handler: cpu_up kick off\n");
-			cpu_up(1);
-			printk("hp_work_handler: cpu_up completion\n");
+			int onlines_cpu_n = num_online_cpus();
+			
+			if (g_next_hp_action) // turn on CPU
+			{
+				if (onlines_cpu_n < num_possible_cpus())
+				{
+					printk("hp_work_handler: cpu_up(%d) kick off\n", onlines_cpu_n);
+					cpu_up(onlines_cpu_n);
+					printk("hp_work_handler: cpu_up(%d) completion\n", onlines_cpu_n);
+		
+					dbs_ignore = 0; // force trigger frequency scaling
+				}
+			}
+			else // turn off CPU
+			{
+				if (onlines_cpu_n > 1)
+				{
+					printk("hp_work_handler: cpu_down(%d) kick off\n", (onlines_cpu_n - 1));
+					cpu_down((onlines_cpu_n - 1));
+					printk("hp_work_handler: cpu_down(%d) completion\n", (onlines_cpu_n - 1));
+		
+					dbs_ignore = 0; // force trigger frequency scaling
+				}
+			}
 		}
-		else
-		{
-			printk("hp_work_handler: cpu_down kick off\n");
-			cpu_down(1);
-			printk("hp_work_handler: cpu_down completion\n");
-		}
+		
 		mutex_unlock(&hp_onoff_mutex);
 	}
 }
@@ -816,7 +713,6 @@ static void hp_work_handler(struct work_struct *work)
 static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 {
 	unsigned int max_load_freq;
-	unsigned int sum_load_freq;
 
 	struct cpufreq_policy *policy;
 	unsigned int j;
@@ -838,9 +734,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 	/* Get Absolute Load - in terms of freq */
 	max_load_freq = 0;
-	sum_load_freq = 0;
-
-	g_sum_load = 0;
+	cpus_sum_load = 0;
 
 	for_each_cpu(j, policy->cpus) {
 		struct cpu_dbs_info_s *j_dbs_info;
@@ -849,7 +743,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		unsigned int load, load_freq;
 		int freq_avg;
 
-		j_dbs_info = &per_cpu(hb_cpu_dbs_info, j);
+		j_dbs_info = &per_cpu(hp_cpu_dbs_info, j);
 
 		cur_idle_time = get_cpu_idle_time(j, &cur_wall_time);
 		cur_iowait_time = get_cpu_iowait_time(j, &cur_wall_time);
@@ -884,7 +778,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		}
 
 		/*
-		 * For the purpose of hybrid, waiting for disk IO is an
+		 * For the purpose of hotplug, waiting for disk IO is an
 		 * indication that you're performance critical, and not that
 		 * the system is actually idle. So subtract the iowait time
 		 * from the cpu idle time.
@@ -898,7 +792,7 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 		load = 100 * (wall_time - idle_time) / wall_time;
 
-		g_sum_load += load;
+		cpus_sum_load += load;
 
 		freq_avg = __cpufreq_driver_getavg(policy, j);
 		if (freq_avg <= 0)
@@ -908,12 +802,10 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 		if (load_freq > max_load_freq)
 			max_load_freq = load_freq;
 			
-		sum_load_freq += load_freq;
-
 		#ifdef DEBUG_LOG
 		printk("dbs_check_cpu: cpu = %d\n", j);
 		printk("dbs_check_cpu: wall_time = %d, idle_time = %d, load = %d\n", wall_time, idle_time, load);
-		printk("dbs_check_cpu: freq_avg = %d, max_load_freq = %d, sum_load_freq = %d\n", freq_avg, max_load_freq, sum_load_freq);
+		printk("dbs_check_cpu: freq_avg = %d, max_load_freq = %d, cpus_sum_load = %d\n", freq_avg, max_load_freq, cpus_sum_load);
 		#endif
 	}
 
@@ -964,54 +856,68 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 
 hp_check:
 
+	/* If Hot Plug policy disable, return directly */
+	if (dbs_tuners_ins.cpu_hotplug_disable)
+		return;
+
 	#ifdef CONFIG_SMP
 	mutex_lock(&hp_mutex);
-	if (!g_disable_hotplug) {
-		/* Check if power up slave CPU */
-		if (num_online_cpus() == 1) {
-			g_cpu_up_sum_grade += hb_check_grade((sum_load_freq / policy->cur));
-			if (g_cpu_up_sum_grade < 0)
-				g_cpu_up_sum_grade = 0;
-			if (g_cpu_up_sum_grade >= dbs_tuners_ins.cpu_up_bound) {
+
+	/* Check CPU loading to power up slave CPU */
+	if (num_online_cpus() < dbs_tuners_ins.cpu_num_base && num_online_cpus() < dbs_tuners_ins.cpu_num_limit) {
+		g_next_hp_action = 1;
+		schedule_delayed_work_on(0, &hp_work, 0);
+	} else if (num_online_cpus() < num_possible_cpus() && num_online_cpus() < dbs_tuners_ins.cpu_num_limit) {
+		g_cpu_up_count++;
+		g_cpu_up_sum_load += cpus_sum_load;
+		if (g_cpu_up_count == dbs_tuners_ins.cpu_up_avg_times) {
+			g_cpu_up_sum_load /= dbs_tuners_ins.cpu_up_avg_times;
+			if (g_cpu_up_sum_load > 
+				(dbs_tuners_ins.cpu_up_threshold * num_online_cpus())) {
 				#ifdef DEBUG_LOG
-				printk("dbs_check_cpu: g_cpu_up_sum_grade = %d, turn on CPU1\n", g_cpu_up_sum_grade);
+				printk("dbs_check_cpu: g_cpu_up_sum_load = %d\n", g_cpu_up_sum_load);
 				#endif
-				if (num_online_cpus() < g_limit_cpu_num) {
-					printk("dbs_check_cpu: turn on CPU1\n");
-					g_next_hp_action = 1;
+				dbs_freq_increase(policy, policy->max);
+				printk("dbs_check_cpu: turn on CPU\n");
+				g_next_hp_action = 1;
+				schedule_delayed_work_on(0, &hp_work, 0);
+			}
+			g_cpu_up_count = 0;
+			g_cpu_up_sum_load = 0;
+		}
+		#ifdef DEBUG_LOG
+		printk("dbs_check_cpu: g_cpu_up_count = %d, g_cpu_up_sum_load = %d\n", g_cpu_up_count, g_cpu_up_sum_load);
+		printk("dbs_check_cpu: cpu_up_threshold = %d\n", (dbs_tuners_ins.cpu_up_threshold * num_online_cpus()));
+		#endif
+	}
+
+	/* Check CPU loading to power down slave CPU */
+	if (num_online_cpus() > 1) {
+		g_cpu_down_count++;
+		g_cpu_down_sum_load += cpus_sum_load;
+		if (g_cpu_down_count == dbs_tuners_ins.cpu_down_avg_times) {
+			g_cpu_down_sum_load /= dbs_tuners_ins.cpu_down_avg_times;
+			if (g_cpu_down_sum_load < 
+				((dbs_tuners_ins.cpu_up_threshold - dbs_tuners_ins.cpu_down_differential) * (num_online_cpus() - 1))) {
+				if (num_online_cpus() > dbs_tuners_ins.cpu_num_base) {
+					#ifdef DEBUG_LOG
+					printk("dbs_check_cpu: g_cpu_down_sum_load = %d\n", g_cpu_down_sum_load);
+					#endif
+					dbs_freq_increase(policy, policy->max);
+					printk("dbs_check_cpu: turn off CPU\n");
+					g_next_hp_action = 0;
 					schedule_delayed_work_on(0, &hp_work, 0);
 				}
-				g_cpu_up_sum_grade = 0;
 			}
-			#ifdef DEBUG_LOG
-			printk("dbs_check_cpu: g_cpu_up_sum_grade = %d\n", g_cpu_up_sum_grade);
-			#endif
-		} else { /* Check if power down slave CPU */
-			if (num_online_cpus() > 1) {
-				g_cpu_down_count++;
-				g_cpu_down_sum_load_freq += ((sum_load_freq) / 100);
-				if (g_cpu_down_count == dbs_tuners_ins.cpu_down_avg_times) {
-					g_cpu_down_sum_load_freq /= dbs_tuners_ins.cpu_down_avg_times;
-					if (g_cpu_down_sum_load_freq < 
-						((dbs_tuners_ins.cpu_down_threshold * policy->max) / 100)) {
-						#ifdef DEBUG_LOG
-						printk("dbs_check_cpu: g_cpu_down_sum_load_freq = %d, turn off CPU1\n", g_cpu_down_sum_load_freq);
-						#endif
-						dbs_freq_increase(policy, policy->max);
-						printk("dbs_check_cpu: turn off CPU1\n");
-						g_next_hp_action = 0;
-						schedule_delayed_work_on(0, &hp_work, 0);
-					}
-					g_cpu_down_count = 0;
-					g_cpu_down_sum_load_freq = 0;
-				}
-				#ifdef DEBUG_LOG
-				printk("dbs_check_cpu: g_cpu_down_count = %d, g_cpu_down_sum_load_freq = %d\n", g_cpu_down_count, g_cpu_down_sum_load_freq);
-				printk("dbs_check_cpu: cpu_down_freq = %d\n", dbs_tuners_ins.cpu_down_threshold * policy->max);
-				#endif
-			}
+			g_cpu_down_count = 0;
+			g_cpu_down_sum_load = 0;
 		}
+		#ifdef DEBUG_LOG
+		printk("dbs_check_cpu: g_cpu_down_count = %d, g_cpu_down_sum_load = %d\n", g_cpu_down_count, g_cpu_down_sum_load);
+		printk("dbs_check_cpu: cpu_down_threshold = %d\n", ((dbs_tuners_ins.cpu_up_threshold - dbs_tuners_ins.cpu_down_differential) * (num_online_cpus() - 1)));
+		#endif
 	}
+
 	mutex_unlock(&hp_mutex);
 	#endif
 
@@ -1106,7 +1012,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	unsigned int j;
 	int rc;
 
-	this_dbs_info = &per_cpu(hb_cpu_dbs_info, cpu);
+	this_dbs_info = &per_cpu(hp_cpu_dbs_info, cpu);
 
 	switch (event) {
 	case CPUFREQ_GOV_START:
@@ -1118,7 +1024,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		dbs_enable++;
 		for_each_cpu(j, policy->cpus) {
 			struct cpu_dbs_info_s *j_dbs_info;
-			j_dbs_info = &per_cpu(hb_cpu_dbs_info, j);
+			j_dbs_info = &per_cpu(hp_cpu_dbs_info, j);
 			j_dbs_info->cur_policy = policy;
 
 			j_dbs_info->prev_cpu_idle = get_cpu_idle_time(j,
@@ -1129,7 +1035,7 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 		}
 		this_dbs_info->cpu = cpu;
 		this_dbs_info->rate_mult = 1;
-		hybrid_powersave_bias_init_cpu(cpu);
+		hotplug_powersave_bias_init_cpu(cpu);
 		/*
 		 * Start the timerschedule work, when this governor
 		 * is used for first time
@@ -1195,11 +1101,10 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 	return 0;
 }
 
-extern int cpufreq_gov_dbs_get_sum_load(void);
-//{
-	/* only for dual core turbo mode */
-//	return g_sum_load;
-//}
+int cpufreq_gov_dbs_get_sum_load(void)
+{
+	return cpus_sum_load;
+}
 
 static int __init cpufreq_gov_dbs_init(void)
 {
@@ -1213,8 +1118,10 @@ static int __init cpufreq_gov_dbs_init(void)
 		dbs_tuners_ins.up_threshold = MICRO_FREQUENCY_UP_THRESHOLD;
 		dbs_tuners_ins.down_differential =
 					MICRO_FREQUENCY_DOWN_DIFFERENTIAL;
-		dbs_tuners_ins.cpu_down_threshold =
-					MICRO_CPU_DOWN_THRESHOLD;
+		dbs_tuners_ins.cpu_up_threshold =
+					MICRO_CPU_UP_THRESHOLD;
+		dbs_tuners_ins.cpu_down_differential =
+					MICRO_CPU_DOWN_DIFFERENTIAL;
 		/*
 		 * In nohz/micro accounting case we set the minimum frequency
 		 * not depending on HZ, but fixed (very low). The deferred
@@ -1227,7 +1134,11 @@ static int __init cpufreq_gov_dbs_init(void)
 			MIN_SAMPLING_RATE_RATIO * jiffies_to_usecs(10);
 	}
 
-	g_limit_cpu_num = g_available_cpu_num = num_possible_cpus();
+	dbs_tuners_ins.cpu_num_limit = num_possible_cpus();
+	dbs_tuners_ins.cpu_num_base = 1;
+
+	if (dbs_tuners_ins.cpu_num_limit > 1)
+		dbs_tuners_ins.cpu_hotplug_disable = 0;
 
 	#ifdef CONFIG_SMP
 	INIT_DELAYED_WORK_DEFERRABLE(&hp_work, hp_work_handler);
@@ -1237,23 +1148,16 @@ static int __init cpufreq_gov_dbs_init(void)
 	printk("cpufreq_gov_dbs_init: min_sampling_rate = %d\n", min_sampling_rate);
 	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.up_threshold = %d\n", dbs_tuners_ins.up_threshold);
 	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.down_differential = %d\n", dbs_tuners_ins.down_differential);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_down_threshold = %d\n", dbs_tuners_ins.cpu_down_threshold);
-	printk("cpufreq_gov_dbs_init: g_available_cpu_num = %d\n", g_available_cpu_num);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_critical_grade = %d\n", dbs_tuners_ins.load_critical_grade);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_high_grade = %d\n", dbs_tuners_ins.load_high_grade);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_warning_grade = %d\n", dbs_tuners_ins.load_warning_grade);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_medium_grade = %d\n", dbs_tuners_ins.load_medium_grade);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_light_grade = %d\n", dbs_tuners_ins.load_light_grade);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_critical = %d\n", dbs_tuners_ins.load_critical);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_high = %d\n", dbs_tuners_ins.load_high);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_warning = %d\n", dbs_tuners_ins.load_warning);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_medium = %d\n", dbs_tuners_ins.load_medium);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.load_light = %d\n", dbs_tuners_ins.load_light);
-	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_up_bound = %d\n", dbs_tuners_ins.cpu_up_bound);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_up_threshold = %d\n", dbs_tuners_ins.cpu_up_threshold);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_down_differential = %d\n", dbs_tuners_ins.cpu_down_differential);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_up_avg_times = %d\n", dbs_tuners_ins.cpu_up_avg_times);
 	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_down_avg_times = %d\n", dbs_tuners_ins.cpu_down_avg_times);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_num_limit = %d\n", dbs_tuners_ins.cpu_num_limit);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_num_base = %d\n", dbs_tuners_ins.cpu_num_base);
+	printk("cpufreq_gov_dbs_init: dbs_tuners_ins.cpu_hotplug_disable = %d\n", dbs_tuners_ins.cpu_hotplug_disable);
 	#endif 
 
-	return cpufreq_register_governor(&cpufreq_gov_hybrid);
+	return cpufreq_register_governor(&cpufreq_gov_hotplug);
 }
 
 static void __exit cpufreq_gov_dbs_exit(void)
@@ -1262,17 +1166,17 @@ static void __exit cpufreq_gov_dbs_exit(void)
 	cancel_delayed_work_sync(&hp_work);
 	#endif
 
-	cpufreq_unregister_governor(&cpufreq_gov_hybrid);
+	cpufreq_unregister_governor(&cpufreq_gov_hotplug);
 }
 
 
 MODULE_AUTHOR("Venkatesh Pallipadi <venkatesh.pallipadi@intel.com>");
 MODULE_AUTHOR("Alexey Starikovskiy <alexey.y.starikovskiy@intel.com>");
-MODULE_DESCRIPTION("'cpufreq_hybrid' - A dynamic cpufreq governor for "
+MODULE_DESCRIPTION("'cpufreq_hotplug' - A dynamic cpufreq governor for "
 	"Low Latency Frequency Transition capable processors");
 MODULE_LICENSE("GPL");
 
-#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HYBRID
+#ifdef CONFIG_CPU_FREQ_DEFAULT_GOV_HOTPLUG
 fs_initcall(cpufreq_gov_dbs_init);
 #else
 module_init(cpufreq_gov_dbs_init);
