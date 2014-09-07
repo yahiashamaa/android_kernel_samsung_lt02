@@ -1493,21 +1493,18 @@ void __init lt02_add_lcd_mipi(void)
 	else
 		fb->mmap = 3;
 
-	if (vx5d3bInfo->lcd_panel == 2 || vx5d3bInfo->lcd_panel == 0) {
-		fb->modes->left_margin = 125;/*BOEVE / CPT*/
+	if (vx5d3bInfo->lcd_panel == 0) {
+		fb->modes->left_margin = 130; /* CPT*/
 		fb->modes->hsync_len = 16;
-		fb->modes->upper_margin = 28;
-		fb->modes->lower_margin = 28;
 	}
-	else if (vx5d3bInfo->lcd_panel == 4)
-	{
+	else if (vx5d3bInfo->lcd_panel == 2 || vx5d3bInfo->lcd_panel == 4) {
 		fb->modes->hsync_len = 16;
-		fb->modes->left_margin = 110;/*SDCVE*/
-		fb->modes->right_margin = 150;
+		fb->modes->left_margin = 142; /*BOEVE / SDCVE*/
+		fb->modes->right_margin = 185;
 		fb->modes->vsync_len = 4;
 		fb->modes->upper_margin = 7;
-		fb->modes->lower_margin = 7;	
-	}		
+		fb->modes->lower_margin = 7;
+	}
 
 	if (device_create_file(&vx5d3bInfo->bd->dev, &dev_attr_auto_brightness) < 0)
 		pr_err("Failed to create auto_brightness\n");
