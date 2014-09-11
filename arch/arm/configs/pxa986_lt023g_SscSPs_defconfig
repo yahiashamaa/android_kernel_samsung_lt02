@@ -2870,3 +2870,11 @@ CONFIG_VIBRATOR_ANDROID=y
 CONFIG_ANDROID_TIMED_GPIO=y
 # CONFIG_SEC_IRLED is not set
 CONFIG_SENSORS_ASP01=y
+
+
+
+#
+# Workarounds by laufersteppenwolf
+#
+CONFIG_IGNORE_LPM=y
+
