@@ -583,10 +583,10 @@ static ssize_t show_bios_limit(struct cpufreq_policy *policy, char *buf)
 
 #include "../../arch/arm/mach-mmp/include/mach/dvfs.h"
 
-// #define VOLTAGE_DEBUG 1
+#define VOLTAGE_DEBUG 1
 static ssize_t show_UV_mV_table(struct cpufreq_policy *policy, char *buf)
 {
-	int i = 0;
+	int i, j = 0;
 	int max = 0;
 	char *out = buf;
 	extern unsigned long component_freqs[4][20];
@@ -596,9 +596,17 @@ static ssize_t show_UV_mV_table(struct cpufreq_policy *policy, char *buf)
 	max = pxa988_get_vl_num();
 	
 	for (i = 0; i < max; i++) {
+		/* WTF... */
+		if (i == 1)
+			j = 2;
+		else if (i == 2)
+			j = 1;
+		else
+			j = i;
+			
 		out += sprintf(out, "%lumhz: %i mV\n",
 						component_freqs[0][i]/1000, // CORE == 0
-						get_voltage_value(i));
+						get_voltage_value(j));
 //						pxa988_get_vl(i));
 	}
 	
@@ -610,7 +618,7 @@ static ssize_t store_UV_mV_table(struct cpufreq_policy *policy, const char *buf,
 	extern int set_voltage_value(int level, int value);
 	extern struct dvfs_rail pxa988_dvfs_rail_vm;
 	unsigned int ret = 0; // -EINVAL
-	int i = 0;
+	int i, j = 0;
 	int max = 0;
 	int error = 0;
 	unsigned int volt_cur;
@@ -665,8 +673,17 @@ static ssize_t store_UV_mV_table(struct cpufreq_policy *policy, const char *buf,
 	/* Note: Voltages are being applied in 12.5mV steps */
 	/******** TODO: check for min and max values *******/
 	for (i = 0; i < max; i++) {
-		pr_info("Applying %d mV at level %i\n", mv[i], i+1);
-		ret = set_voltage_value(i, mv[i]);
+		
+		/* WTF... */
+		if (i == 1)
+			j = 2;
+		else if (i == 2)
+			j = 1;
+		else
+			j = i;
+			
+		pr_info("Applying %d mV at level %i\n", mv[j], i+1);
+		ret = set_voltage_value(i, mv[j]);
 	}
 
 out:	
