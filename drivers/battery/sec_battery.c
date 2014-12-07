@@ -22,6 +22,12 @@
 #include <linux/secgpio_dvs.h>
 #endif
 
+#ifdef CONFIG_FORCE_FAST_CHARGE
+#include <linux/fastchg.h>
+int ac_charge_level = AC_CHARGE_1800;  /* Start using default value */
+int usb_charge_level = USB_CHARGE_500; /* Start using default value */
+#endif
+
 static struct device_attribute sec_usb_attr[] = {
 	SEC_USB_ATTR(charging_mode_booting),
 };
@@ -2370,7 +2376,43 @@ ssize_t sec_bat_store_attrs(
 				"%s: siop activated: %d\n", __func__, x);
 				battery->pdata->siop_activated = x;
 				if (x == 0) {
+#ifdef CONFIG_FORCE_FAST_CHARGE
+					if (battery->cable_type == POWER_SUPPLY_TYPE_MAINS ||
+						battery->cable_type == POWER_SUPPLY_TYPE_MISC) {
+						dev_info(battery->dev, "laufersteppenwolf: connected to AC\n");
+						switch (force_fast_charge) {
+							case FAST_CHARGE_FORCE_CUSTOM_MA:
+								dev_info(battery->dev, "laufersteppenwolf: setting current to %dmA\n", ac_charge_level);
+								value.intval = ac_charge_level;
+								//value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit;
+								break;
+							default:
+								dev_info(battery->dev, "laufersteppenwolf: running into AC default\n");
+								value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit;
+						}
+					} else if (battery->cable_type == POWER_SUPPLY_TYPE_USB ||
+								battery->cable_type == POWER_SUPPLY_TYPE_USB_DCP ||
+								battery->cable_type == POWER_SUPPLY_TYPE_USB_CDP ||
+								battery->cable_type == POWER_SUPPLY_TYPE_USB_ACA) {
+						dev_info(battery->dev, "laufersteppenwolf: connected to USB\n");
+						switch (force_fast_charge) {
+							case FAST_CHARGE_FORCE_CUSTOM_MA:
+								dev_info(battery->dev, "laufersteppenwolf: setting current to %dmA\n", usb_charge_level);
+								value.intval = usb_charge_level;
+								//value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit
+								break;
+							default:
+								dev_info(battery->dev, "laufersteppenwolf: running into USB default\n");
+								value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit;
+						}
+					} else {
+						dev_info(battery->dev, "laufersteppenwolf: using fallback\n");
+						value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit;
+					}
+#else
 					value.intval = battery->pdata->charging_current[battery->cable_type].input_current_limit;
+#endif
+					dev_info(battery->dev, "laufersteppenwolf: applied value: %d\n", value);
 					psy_do_property("sec-charger", set,
 							POWER_SUPPLY_PROP_CURRENT_NOW, value);
 				}

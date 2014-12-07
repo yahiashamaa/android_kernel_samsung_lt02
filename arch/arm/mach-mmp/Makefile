@@ -72,3 +72,6 @@ endif
 obj-$(CONFIG_CORESIGHT_SUPPORT)	+= coresight-v7.o
 
 obj-$(CONFIG_SEC_THERMISTOR) += sec_thermistor.o
+
+# Fast Charge
+obj-$(CONFIG_FORCE_FAST_CHARGE) += fastchg.o

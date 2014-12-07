@@ -339,5 +339,17 @@ config IGNORE_LPM
 	bool "Ignore all LPM restrictions"
 	help
 	  Ignore all LPM restrictions by overriding the bootmode
+	  
+config VOLTAGE_CONTROL
+	bool "Enable user voltage control interface"
+	default n
+	help
+	  Enable the userspace voltage control interface
+	  
+config FORCE_FAST_CHARGE
+	bool "Force user-defined charging currents"
+	default n
+	help
+	  Enable the ability of forcing user-defined charging currents.
 
 endif
