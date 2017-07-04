@@ -61,7 +61,12 @@ static int mmc_queue_thread(void *d)
 
 		spin_lock_irq(q->queue_lock);
 		set_current_state(TASK_INTERRUPTIBLE);
-		req = blk_fetch_request(q);
+
+		if ((mq->card->quirks & MMC_QUIRK_MOVINAND_TLC ) && (mq->mqrq_prev->req ))
+			req = NULL;
+		else
+			req = blk_fetch_request(q);
+
 		mq->mqrq_cur->req = req;
 		spin_unlock_irq(q->queue_lock);
 
@@ -96,7 +101,7 @@ static int mmc_queue_thread(void *d)
  * on any queue on this host, and attempt to issue it.  This may
  * not be the queue we were asked to process.
  */
-static void mmc_request(struct request_queue *q)
+static void mmc_request_fn(struct request_queue *q)
 {
 	struct mmc_queue *mq = q->queuedata;
 	struct request *req;
@@ -133,9 +138,30 @@ static void mmc_queue_setup_discard(struct request_queue *q,
 {
 	unsigned max_discard;
 
+	/*
+	 * In the eMMC spec, Erase/Trim more blocks need more time.
+	 * But in the real test, the result is very different:
+	 * Erase/Trim more blocks need less time!!
+	 *
+	 * For example, Erase/Trim a range in SDIN5C2-16G:
+	 * Orignally it erase 12MB each time and takes about 6~9s, so 3GB
+	 * need about 30Min, 512MB need about 5Min.
+	 * But if we earse 3GB/512MB in one time, both only need about 6~9s.
+	 *
+	 * Have verified 5 eMMC chips which are available:
+	 * SANDISK 16G, 4G, Micron 16G, Toshiba 16G, Kingston 16G.
+	 * they are the same behavior: Erase/Trim more blocks need less time!
+	 * So set max_discard to UINT_MAX;
+	 *
+	 * FIXME: need to verify/check other eMMC chip if we use them.
+	 */
+#if 0
 	max_discard = mmc_calc_max_discard(card);
 	if (!max_discard)
 		return;
+#else
+	max_discard = UINT_MAX;
+#endif
 
 	queue_flag_set_unlocked(QUEUE_FLAG_DISCARD, q);
 	q->limits.max_discard_sectors = max_discard;
@@ -171,12 +197,10 @@ int mmc_init_queue(struct mmc_queue *mq, struct mmc_card *card,
 		limit = *mmc_dev(host)->dma_mask;
 
 	mq->card = card;
-	mq->queue = blk_init_queue(mmc_request, lock);
+	mq->queue = blk_init_queue(mmc_request_fn, lock);
 	if (!mq->queue)
 		return -ENOMEM;
 
-	memset(&mq->mqrq_cur, 0, sizeof(mq->mqrq_cur));
-	memset(&mq->mqrq_prev, 0, sizeof(mq->mqrq_prev));
 	mq->mqrq_cur = mqrq_cur;
 	mq->mqrq_prev = mqrq_prev;
 	mq->queue->queuedata = mq;

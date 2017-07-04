@@ -74,18 +74,28 @@
 #define IRQ_1WIRE	PXA_IRQ(44)	/* 1-Wire Controller */
 #define IRQ_NAND	PXA_IRQ(45)	/* NAND Controller */
 #define IRQ_USB2	PXA_IRQ(46)	/* USB 2.0 Device Controller */
+#define IRQ_SGP		PXA_IRQ(47)	/* Main PMU */
 #define IRQ_WAKEUP0	PXA_IRQ(49)	/* EXT_WAKEUP0 */
 #define IRQ_WAKEUP1	PXA_IRQ(50)	/* EXT_WAKEUP1 */
 #define IRQ_DMEMC	PXA_IRQ(51)	/* Dynamic Memory Controller */
 #define IRQ_MMC3	PXA_IRQ(55)	/* MMC3 Controller (PXA310) */
 
+#define IRQ_I2C2	PXA_IRQ(61)	/* I2C2 Controller (PXA955) */
+#define IRQ_DSI1	PXA_IRQ(62)	/* DSI1 converter IRQ (PXA95x) */
+#define IRQ_DSI0	PXA_IRQ(63)	/* DSI0 converter IRQ (PXA95x) */
 #define IRQ_U2O		PXA_IRQ(64)	/* USB OTG 2.0 Controller (PXA935) */
 #define IRQ_U2H		PXA_IRQ(65)	/* USB Host 2.0 Controller (PXA935) */
+#define IRQ_LCDPARALLEL	PXA_IRQ(68)	/* Parallel converter IRQ (PXA95x) */
+#define IRQ_LCDGLOBAL	PXA_IRQ(69)	/* LCD controler global IRQ (PXA95x) */
 #define IRQ_PXA935_MMC0	PXA_IRQ(72)	/* MMC0 Controller (PXA935) */
 #define IRQ_PXA935_MMC1	PXA_IRQ(73)	/* MMC1 Controller (PXA935) */
 #define IRQ_PXA935_MMC2	PXA_IRQ(74)	/* MMC2 Controller (PXA935) */
 #define IRQ_PXA955_MMC3	PXA_IRQ(75)	/* MMC3 Controller (PXA955) */
+#define IRQ_I2C1	PXA_IRQ(78)	/* I2C1 Controller (PXA955) */
+#define IRQ_VMETA_FUNC	PXA_IRQ(85)	/* Vmeta normal interrupt (PXA955) */
+#define IRQ_VMETA_BUS	PXA_IRQ(86)	/* Vmeta bus interrrupt (PXA955) */
 #define IRQ_U2P		PXA_IRQ(93)	/* USB PHY D+/D- Lines (PXA935) */
+#define IRQ_PMIC_INT	PXA_IRQ(95)	/* PMIC interrupt (PXA955) */
 
 #define PXA_GPIO_IRQ_BASE	PXA_IRQ(96)
 #define PXA_NR_BUILTIN_GPIO	(192)

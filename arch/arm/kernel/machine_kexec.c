@@ -54,6 +54,11 @@ void machine_crash_nonpanic_core(void *unused)
 		cpu_relax();
 }
 
+void machine_crash_update(struct pt_regs *regs)
+{
+	crash_save_cpu(regs, smp_processor_id());
+}
+
 static void machine_kexec_mask_interrupts(void)
 {
 	unsigned int i;

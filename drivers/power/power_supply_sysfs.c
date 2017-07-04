@@ -167,13 +167,34 @@ static struct device_attribute power_supply_attrs[] = {
 	POWER_SUPPLY_ATTR(capacity),
 	POWER_SUPPLY_ATTR(capacity_level),
 	POWER_SUPPLY_ATTR(temp),
+#if defined(CONFIG_SPA)//book
+	POWER_SUPPLY_ATTR(temp_adc),
+#endif
 	POWER_SUPPLY_ATTR(temp_ambient),
 	POWER_SUPPLY_ATTR(time_to_empty_now),
 	POWER_SUPPLY_ATTR(time_to_empty_avg),
 	POWER_SUPPLY_ATTR(time_to_full_now),
 	POWER_SUPPLY_ATTR(time_to_full_avg),
 	POWER_SUPPLY_ATTR(type),
+#if defined(CONFIG_SPA)//book
+	/* *#0228# */
+	POWER_SUPPLY_ATTR(batt_vol),
+	POWER_SUPPLY_ATTR(batt_vol_aver),
+	POWER_SUPPLY_ATTR(batt_temp),
+	POWER_SUPPLY_ATTR(batt_temp_adc),
+	POWER_SUPPLY_ATTR(batt_temp_aver),
+	POWER_SUPPLY_ATTR(batt_temp_adc_aver),
+	POWER_SUPPLY_ATTR(batt_charging_source),
+	/* *#0228# */
+	/* DFT */
+	POWER_SUPPLY_ATTR(batt_read_raw_soc),
+	/* DFT */
+#endif
 	POWER_SUPPLY_ATTR(scope),
+	/* Local extensions */
+	POWER_SUPPLY_ATTR(usb_hc),
+	POWER_SUPPLY_ATTR(usb_otg),
+	POWER_SUPPLY_ATTR(charge_enabled),
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_ATTR(model_name),
 	POWER_SUPPLY_ATTR(manufacturer),

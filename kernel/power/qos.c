@@ -29,8 +29,10 @@
 
 /*#define DEBUG*/
 
+#include <linux/debugfs.h>
 #include <linux/pm_qos.h>
 #include <linux/sched.h>
+#include <linux/seq_file.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
 #include <linux/time.h>
@@ -45,18 +47,8 @@
 #include <linux/uaccess.h>
 #include <linux/export.h>
 
-/*
- * locking rule: all changes to constraints or notifiers lists
- * or pm_qos_object list and pm_qos_objects need to happen with pm_qos_lock
- * held, taken with _irqsave.  One lock to rule them all
- */
-struct pm_qos_object {
-	struct pm_qos_constraints *constraints;
-	struct miscdevice pm_qos_power_miscdev;
-	char *name;
-};
 
-static DEFINE_SPINLOCK(pm_qos_lock);
+DEFINE_SPINLOCK(pm_qos_lock);
 
 static struct pm_qos_object null_pm_qos;
 
@@ -100,12 +92,142 @@ static struct pm_qos_object network_throughput_pm_qos = {
 	.name = "network_throughput",
 };
 
+static BLOCKING_NOTIFIER_HEAD(cpuidle_block_notifier);
+static struct pm_qos_constraints cpuidle_block_constraints = {
+	.list = PLIST_HEAD_INIT(cpuidle_block_constraints.list),
+	.target_value = PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE,
+	.default_value = PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE,
+	.type = PM_QOS_MAX,
+	.notifiers = &cpuidle_block_notifier,
+};
+static struct pm_qos_object cpuidle_block_pm_qos = {
+	.constraints = &cpuidle_block_constraints,
+	.name = "cpuidle_block",
+};
 
-static struct pm_qos_object *pm_qos_array[] = {
+#ifdef CONFIG_DDR_DEVFREQ
+static BLOCKING_NOTIFIER_HEAD(ddr_devfreq_min_notifier);
+static struct pm_qos_constraints ddr_devfreq_min_constraints = {
+	.list = PLIST_HEAD_INIT(ddr_devfreq_min_constraints.list),
+	.target_value = PM_QOS_DEFAULT_VALUE,
+	.default_value = PM_QOS_DEFAULT_VALUE,
+	.type = PM_QOS_MAX,
+	.notifiers = &ddr_devfreq_min_notifier,
+};
+static struct pm_qos_object ddr_devfreq_min_pm_qos = {
+	.constraints = &ddr_devfreq_min_constraints,
+	.name = "ddr_devfreq_min",
+};
+static BLOCKING_NOTIFIER_HEAD(ddr_devfreq_max_notifier);
+static struct pm_qos_constraints ddr_devfreq_max_constraints = {
+	.list = PLIST_HEAD_INIT(ddr_devfreq_max_constraints.list),
+	.target_value = PM_QOS_DEFAULT_VALUE,
+	.default_value = PM_QOS_DEFAULT_VALUE,
+	.type = PM_QOS_MIN,
+	.notifiers = &ddr_devfreq_max_notifier,
+};
+static struct pm_qos_object ddr_devfreq_max_pm_qos = {
+	.constraints = &ddr_devfreq_max_constraints,
+	.name = "ddr_devfreq_max",
+};
+#endif
+#ifdef CONFIG_MCK5_ACTIVITY_MONITOR
+static BLOCKING_NOTIFIER_HEAD(act_min_notifier);
+static struct pm_qos_constraints ddr_act_min_constraints = {
+	.list = PLIST_HEAD_INIT(ddr_act_min_constraints.list),
+	.notifiers = &act_min_notifier,
+	.default_value = 0,
+	.target_value = 0,
+	.type = PM_QOS_MAX,
+};
+static struct pm_qos_object ddr_act_min_pm_qos = {
+	.constraints = &ddr_act_min_constraints,
+	.name = "ddr_act_min",
+};
+#endif
+static BLOCKING_NOTIFIER_HEAD(axi_min_notifier);
+static struct pm_qos_constraints axi_min_constraints = {
+	.list = PLIST_HEAD_INIT(axi_min_constraints.list),
+	.notifiers = &axi_min_notifier,
+	.default_value = 0,
+	.target_value = 0,
+	.type = PM_QOS_MAX,
+};
+static struct pm_qos_object axi_min_pm_qos = {
+	.constraints = &axi_min_constraints,
+	.name = "axi_min",
+};
+
+static BLOCKING_NOTIFIER_HEAD(cpu_freq_min_notifier);
+static struct pm_qos_constraints cpu_freq_min_constraints = {
+	.list = PLIST_HEAD_INIT(cpu_freq_min_constraints.list),
+	.notifiers = &cpu_freq_min_notifier,
+	.default_value = 0,
+	.target_value = 0,
+	.type = PM_QOS_MAX,
+};
+
+static struct pm_qos_object cpu_freq_min_pm_qos = {
+	.constraints = &cpu_freq_min_constraints,
+	.name = "cpu_freq_min",
+};
+
+static BLOCKING_NOTIFIER_HEAD(cpu_freq_max_notifier);
+static struct pm_qos_constraints cpu_freq_max_constraints = {
+	.list = PLIST_HEAD_INIT(cpu_freq_max_constraints.list),
+	.notifiers = &cpu_freq_max_notifier,
+	.default_value = 0,
+	.target_value = 0,
+	.type = PM_QOS_MIN,
+};
+
+static struct pm_qos_object cpu_freq_max_pm_qos = {
+	.constraints = &cpu_freq_max_constraints,
+	.name = "cpu_freq_max",
+};
+
+#define DECLARE_GPU_NOTIFIER(CORE, MINMAX, TYPE) \
+	static BLOCKING_NOTIFIER_HEAD(gpu_freq_##CORE##_##MINMAX##_notifier); \
+	static struct pm_qos_constraints gpu_freq_##CORE##_##MINMAX##_constraints = { \
+		.list = PLIST_HEAD_INIT(gpu_freq_##CORE##_##MINMAX##_constraints.list), \
+		.notifiers = &gpu_freq_##CORE##_##MINMAX##_notifier, \
+		.default_value = 0, \
+		.target_value = 0, \
+		.type = TYPE, \
+	}; \
+	static struct pm_qos_object gpu_freq_##CORE##_##MINMAX##_pm_qos = { \
+		.constraints = &gpu_freq_##CORE##_##MINMAX##_constraints, \
+		.name = "gpu_freq_"#CORE"_"#MINMAX, \
+	};
+DECLARE_GPU_NOTIFIER(3d, min, PM_QOS_MAX);
+DECLARE_GPU_NOTIFIER(2d, min, PM_QOS_MAX);
+DECLARE_GPU_NOTIFIER(sh, min, PM_QOS_MAX);
+DECLARE_GPU_NOTIFIER(3d, max, PM_QOS_MIN);
+DECLARE_GPU_NOTIFIER(2d, max, PM_QOS_MIN);
+DECLARE_GPU_NOTIFIER(sh, max, PM_QOS_MIN);
+
+struct pm_qos_object *pm_qos_array[] = {
 	&null_pm_qos,
 	&cpu_dma_pm_qos,
 	&network_lat_pm_qos,
-	&network_throughput_pm_qos
+	&network_throughput_pm_qos,
+	&cpuidle_block_pm_qos,
+#ifdef CONFIG_DDR_DEVFREQ
+	&ddr_devfreq_min_pm_qos,
+	&ddr_devfreq_max_pm_qos,
+#endif
+#ifdef CONFIG_MCK5_ACTIVITY_MONITOR
+	&ddr_act_min_pm_qos,
+#endif
+	&axi_min_pm_qos,
+	&cpu_freq_min_pm_qos,
+	&cpu_freq_max_pm_qos,
+	&gpu_freq_3d_min_pm_qos,
+	&gpu_freq_2d_min_pm_qos,
+	&gpu_freq_sh_min_pm_qos,
+	&gpu_freq_3d_max_pm_qos,
+	&gpu_freq_2d_max_pm_qos,
+	&gpu_freq_sh_max_pm_qos,
 };
 
 static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
@@ -515,6 +637,71 @@ static ssize_t pm_qos_power_write(struct file *filp, const char __user *buf,
 	return count;
 }
 
+static struct dentry *cpuidle_block_dentry;
+
+/**
+ * cpuidle_block_show - Print information of devices blocking LPM.
+ * @m: seq_file to print the statistics into.
+ */
+
+static ssize_t cpuidle_block_show(struct seq_file *m, void *unused)
+{
+	unsigned long flags;
+	struct pm_qos_object *o;
+	struct list_head *list;
+	struct plist_node *node;
+	struct pm_qos_request *req;
+	s32 target_value = 0;
+	/* The item sequence should align with PM_QOS_CPUIDLE_BLOCK_*. */
+	char *lpm_modes[] = {"Default", "D2", "D1", "D1P"};
+
+	o = pm_qos_array[PM_QOS_CPUIDLE_BLOCK];
+	list = &o->constraints->list.node_list;
+
+	rcu_read_lock();
+	spin_lock_irqsave(&pm_qos_lock, flags);
+
+	target_value = pm_qos_read_value(o->constraints);
+	if (target_value != PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE) {
+		seq_printf(m, "Can't enter state equals to or deeper than %s\n",
+				lpm_modes[target_value]);
+		seq_printf(m, "*****Blocking devices*****\n");
+	} else
+		seq_printf(m, "SOC can enter all states\n");
+
+	list_for_each_entry(node, list, node_list) {
+		req = container_of(node, struct pm_qos_request, node);
+		if (node->prio != PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE)
+			seq_printf(m, "%s:\t%s\n",
+				lpm_modes[node->prio], req->name);
+	}
+
+	spin_unlock_irqrestore(&pm_qos_lock, flags);
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int cpuidle_block_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cpuidle_block_show, NULL);
+}
+
+const struct file_operations cpuidle_block_stats_fops = {
+	.owner = THIS_MODULE,
+	.open = cpuidle_block_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
+
+static int __init cpuidle_block_debugfs_init(void)
+{
+	cpuidle_block_dentry = debugfs_create_file("cpuidle_block_devices",
+			S_IRUGO, NULL, NULL, &cpuidle_block_stats_fops);
+	return 0;
+}
+
+postcore_initcall(cpuidle_block_debugfs_init);
 
 static int __init pm_qos_power_init(void)
 {
@@ -536,3 +723,133 @@ static int __init pm_qos_power_init(void)
 }
 
 late_initcall(pm_qos_power_init);
+
+
+/**
+ * cpufreq_qos_show - Print information of cpu freq qos min and max.
+ * @m: seq_file to print the statistics into.
+ */
+static ssize_t cpufreq_qos_show(struct seq_file *m, void *unused)
+{
+	unsigned long flags;
+	struct pm_qos_object *qos_min, *qos_max;
+	struct list_head *list_min, *list_max;
+	struct plist_node *node;
+	s32 target_min = 0, target_max = 0;
+	struct pm_qos_request *req;
+
+	qos_min = pm_qos_array[PM_QOS_CPUFREQ_MIN];
+	list_min = &qos_min->constraints->list.node_list;
+	qos_max = pm_qos_array[PM_QOS_CPUFREQ_MAX];
+	list_max = &qos_max->constraints->list.node_list;
+
+	rcu_read_lock();
+	spin_lock_irqsave(&pm_qos_lock, flags);
+
+	target_min = pm_qos_read_value(qos_min->constraints);
+	target_max = pm_qos_read_value(qos_max->constraints);
+
+	seq_printf(m, "Target min %d\n", target_min);
+	list_for_each_entry(node, list_min, node_list) {
+		req = container_of(node, struct pm_qos_request, node);
+		if (node->prio != PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE)
+			seq_printf(m, "Req: %d\t Name: %s\n",
+				node->prio, req->name);
+	}
+
+	seq_printf(m, "Target max %d\n", target_max);
+	list_for_each_entry(node, list_max, node_list) {
+		req = container_of(node, struct pm_qos_request, node);
+		if (node->prio != PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE)
+			seq_printf(m, "Req: %d\t Name: %s\n",
+				node->prio, req->name);
+	}
+	spin_unlock_irqrestore(&pm_qos_lock, flags);
+	rcu_read_unlock();
+
+	return 0;
+}
+
+static int cpufreq_qos_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, cpufreq_qos_show, NULL);
+}
+
+const struct file_operations cpufreq_qos_fops = {
+	.owner = THIS_MODULE,
+	.open = cpufreq_qos_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
+
+static int __init cpufreq_qos_debugfs_init(void)
+{
+	debugfs_create_file("cpufreq_qos",
+			S_IRUGO, NULL, NULL, &cpufreq_qos_fops);
+	return 0;
+}
+postcore_initcall(cpufreq_qos_debugfs_init);
+#define __GPUFREQ_QOS_SHOW(CORE, PM_QOS_CLASS_MIN, PM_QOS_CLASS_MAX) \
+{ \
+	unsigned long flags; \
+	struct pm_qos_object *qos_min, *qos_max; \
+	struct list_head *list_min, *list_max; \
+	struct plist_node *node; \
+	s32 target_min = 0, target_max = 0; \
+	struct pm_qos_request *req; \
+\
+	qos_min = pm_qos_array[PM_QOS_CLASS_MIN]; \
+	list_min = &qos_min->constraints->list.node_list; \
+	qos_max = pm_qos_array[PM_QOS_CLASS_MAX]; \
+	list_max = &qos_max->constraints->list.node_list; \
+\
+	rcu_read_lock(); \
+	spin_lock_irqsave(&pm_qos_lock, flags); \
+\
+	target_min = pm_qos_read_value(qos_min->constraints); \
+	target_max = pm_qos_read_value(qos_max->constraints); \
+\
+	seq_printf(m, #CORE " | Target min %d\n", target_min); \
+	list_for_each_entry(node, list_min, node_list) { \
+		req = container_of(node, struct pm_qos_request, node); \
+		if (node->prio != 0) \
+			seq_printf(m, "Req: %d\t Name: %s\n", \
+				node->prio, req->name); \
+	} \
+	seq_printf(m, "\n"); \
+\
+	seq_printf(m, #CORE " | Target max %d\n", target_max); \
+	list_for_each_entry(node, list_max, node_list) { \
+		req = container_of(node, struct pm_qos_request, node); \
+		if (node->prio != 0) \
+			seq_printf(m, "Req: %d\t Name: %s\n", \
+				node->prio, req->name); \
+	} \
+	seq_printf(m, "\n"); \
+	spin_unlock_irqrestore(&pm_qos_lock, flags); \
+	rcu_read_unlock(); \
+}
+static ssize_t gpufreq_qos_show(struct seq_file *m, void *unused)
+{
+	__GPUFREQ_QOS_SHOW(3D, PM_QOS_GPUFREQ_3D_MIN, PM_QOS_GPUFREQ_3D_MAX);
+	__GPUFREQ_QOS_SHOW(2D, PM_QOS_GPUFREQ_2D_MIN, PM_QOS_GPUFREQ_2D_MAX);
+	__GPUFREQ_QOS_SHOW(SH, PM_QOS_GPUFREQ_SH_MIN, PM_QOS_GPUFREQ_SH_MAX);
+	return 0;
+}
+static int gpufreq_qos_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, gpufreq_qos_show, NULL);
+}
+const struct file_operations gpufreq_qos_fops = {
+	.owner = THIS_MODULE,
+	.open = gpufreq_qos_open,
+	.read = seq_read,
+	.llseek = seq_lseek,
+};
+static int __init gpufreq_qos_debugfs_init(void)
+{
+	debugfs_create_file("gpufreq_qos",
+			S_IRUGO, NULL, NULL, &gpufreq_qos_fops);
+	return 0;
+}
+postcore_initcall(gpufreq_qos_debugfs_init);

@@ -8,6 +8,14 @@ menuconfig POWER_SUPPLY
 
 if POWER_SUPPLY
 
+config BATTERY_SAMSUNG
+	tristate "samsung battery driver"
+	help
+	 Say Y to include support for samsung battery driver
+	 This battery driver integrated all battery-related functions
+	 To see battery-related functions,
+	 refer to sec_charging_common.h
+
 config POWER_SUPPLY_DEBUG
 	bool "Power supply debug"
 	help
@@ -61,6 +69,97 @@ config TEST_POWER
 	tristate "Test power driver"
 	help
 	  This driver is used for testing. It's safe to say M here.
+
+config BATTERY_88PM80X
+	tristate "Marvell 88PM80x battery driver"
+	depends on MFD_88PM800
+	help
+	  Say Y here to enable battery monitor for Marvell 88PM80x chip.
+	  This driver uses the ADC function of 88PM80x. The capacity of the
+	  battery is calculated via the voltage. So it may not be very
+	  accurate.
+
+config BATTERY_88PM860X
+	tristate "Marvell 88PM860x battery driver"
+	depends on MFD_88PM860X
+	help
+	  Say Y here to enable battery monitor for Marvell 88PM860x chip.
+
+config SPA
+        tristate "Samsung Power&Accessory"
+        help
+         Samsung Power&Accessory
+
+config SPA_LPM_MODE
+	tristate "power off charging mode"
+	depends on SPA
+	help
+	  power off charging mode
+
+config SPA_FUEL_GAUGE_TEST
+	tristate "fuel gauge test binary"
+	depends on SPA
+	help
+	 fuel gauge test binary
+
+config SPA_POWER_OFF_BY_LOW_VOLTAGE
+	tristate "power off by low voltage"
+	depends on SPA
+	help
+	 power off by low voltage 
+
+config STC3105_FUELGAUGE
+        tristate "STC3105_FUELGAUGE"
+        help
+         STC3105_FUELGAUGE
+
+config FSA9480_MICROUSB
+        tristate "FSA9480_MICROUSB"
+        help
+         FSA9480_MICROUSB
+
+config MAX17043_FUELGAUGE
+        tristate "MAX17043_FUELGAUGE"
+        help
+         MAX17043_FUELGAUGE
+
+config BQ27425_FUELGAUGE
+        tristate "BQ27425_FUELGAUGE"
+        help
+         BQ27425_FUELGAUGE
+
+config BQ27425_READ_VF
+        tristate "BQ27425_READ_VF"
+	depends on BQ27425_FUELGAUGE
+        help
+         BQ27425_READ_VF
+
+config BQ27425_SOC_COMPENSATION_FOR_DISCHARGING
+        tristate "BQ27425_SOC_COMPENSATION_FOR_DISCHARGING"
+	depends on BQ27425_FUELGAUGE
+        help
+         BQ27425_SOC_COMPENSATION_FOR_DISCHARGING
+
+config SS6000_CHARGER
+	tristate "SS6000_CHARGER"
+	help
+	 SS6000_CHARGER
+
+config SS6000_CHARGER_OVP_FEATURE
+	tristate "SS6000_CHARGER_OVP_FEATURE"
+	depends on SS6000_CHARGER
+	help
+	 SS6000_CHARGER_OVP_FEATURE
+
+config STC3115_FUELGAUGE
+        tristate "STC3115_FUELGAUGE"
+        help
+         STC3115_FUELGAUGE
+
+config BQ24157_CHARGER
+	tristate "BQ24157_CHARGER"
+	help
+	 BQ24157_CHARGER
 
 config BATTERY_DS2760
 	tristate "DS2760 battery driver (HP iPAQ & others)"
@@ -190,6 +289,16 @@ config BATTERY_MAX17042
 	  multi-function devices that include fuel gauages that are compatible
 	  with MAX17042.
 
+config BATTERY_ANDROID
+	tristate "Battery driver for Android"
+	help
+	  Say Y to enable generic support for battery charging according
+	  to common Android policies.
+	  This driver adds periodic battery level and health monitoring,
+	  kernel log reporting and other debugging features, common board
+	  battery file glue logic for battery/case temperature sensors,
+	  etc.
+
 config BATTERY_Z2
 	tristate "Z2 battery driver"
 	depends on I2C && MACH_ZIPIT2
@@ -307,4 +416,11 @@ config AB8500_BATTERY_THERM_ON_BATCTRL
 	help
 	  Say Y to enable battery temperature measurements using
 	  thermistor connected on BATCTRL ADC.
+
+config CHARGER_ISL9226
+	tristate "ISL9226 batter charger support"
+	depends on I2C
+	help
+	  Say Y to include support for ISL9226 charger driver.
+
 endif # POWER_SUPPLY

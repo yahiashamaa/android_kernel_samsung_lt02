@@ -2,10 +2,10 @@
  * include/linux/serial_reg.h
  *
  * Copyright (C) 1992, 1994 by Theodore Ts'o.
- * 
- * Redistribution of this file is permitted under the terms of the GNU 
+ *
+ * Redistribution of this file is permitted under the terms of the GNU
  * Public License (GPL)
- * 
+ *
  * These are the UART port assignments, expressed as offsets from the base
  * register.  These assignments should hold for any serial port based on
  * a 8250, 16450, or 16550(A).
@@ -86,7 +86,7 @@
 
 #define UART_LCR	3	/* Out: Line Control Register */
 /*
- * Note: if the word length is 5 bits (UART_LCR_WLEN5), then setting 
+ * Note: if the word length is 5 bits (UART_LCR_WLEN5), then setting
  * UART_LCR_STOP will select 1.5 stop bits, not 2 stop bits.
  */
 #define UART_LCR_DLAB		0x80 /* Divisor latch access bit */
@@ -223,6 +223,7 @@
 #define UART_IER_UUE	0x40	/* UART Unit Enable */
 #define UART_IER_NRZE	0x20	/* NRZ coding Enable */
 #define UART_IER_RTOIE	0x10	/* Receiver Time Out Interrupt Enable */
+#define UART_IER_HSE	0x100	/* High Speed UART Enable */
 
 #define UART_IIR_TOD	0x08	/* Character Timeout Indication Detected */
 
@@ -230,6 +231,10 @@
 #define UART_FCR_PXAR8	0x40	/* receive FIFO threshold = 8 */
 #define UART_FCR_PXAR16	0x80	/* receive FIFO threshold = 16 */
 #define UART_FCR_PXAR32	0xc0	/* receive FIFO threshold = 32 */
+#define UART_FCR_PXA_BUS32	0x20	/* 32-Bit Peripheral Bus */
+#define UART_FCR_PXA_TRAIL	0x10	/* Trailing Bytes */
+
+#define UART_LSR_FIFOE	0x80	/* FIFO Error Status */
 
 /*
  * Intel MID on-chip HSU (High Speed UART) defined bits

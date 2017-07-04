@@ -194,6 +194,9 @@ config NEED_RET_TO_USER
 config ARCH_MTD_XIP
 	bool
 
+config ARCH_PROVIDES_UDELAY
+	bool
+
 config VECTORS_BASE
 	hex
 	default 0xffff0000 if MMU || CPU_HIGH_VECTOR
@@ -626,18 +629,22 @@ config ARCH_ORION5X
 	  Orion-2 (5281), Orion-1-90 (6183).
 
 config ARCH_MMP
-	bool "Marvell PXA168/910/MMP2"
+	bool "Marvell PXA168/910/988/MMP2"
 	depends on MMU
 	select ARCH_REQUIRE_GPIOLIB
 	select CLKDEV_LOOKUP
 	select GENERIC_CLOCKEVENTS
 	select GPIO_PXA
+	select IRQ_DOMAIN
 	select TICK_ONESHOT
 	select PLAT_PXA
 	select SPARSE_IRQ
+	select ARCH_HAS_CPUFREQ
 	select GENERIC_ALLOCATOR
+	select NEED_MACH_IO_H
+	select NEED_MACH_MEMORY_H
 	help
-	  Support for Marvell's PXA168/PXA910(MMP) and MMP2 processor line.
+	  Support for Marvell's PXA168/PXA910/PXA988 and MMP2 processor line.
 
 config ARCH_KS8695
 	bool "Micrel/Kendin KS8695"
@@ -723,6 +730,7 @@ config ARCH_PXA
 	select MULTI_IRQ_HANDLER
 	select ARM_CPU_SUSPEND if PM
 	select HAVE_IDE
+	select NEED_MACH_IO_H
 	help
 	  Support for Intel/Marvell's PXA2xx/PXA3xx processor line.
 
@@ -1160,7 +1168,7 @@ config ARM_NR_BANKS
 
 config IWMMXT
 	bool "Enable iWMMXt support"
-	depends on CPU_XSCALE || CPU_XSC3 || CPU_MOHAWK || CPU_PJ4
+	depends on CPU_XSCALE || CPU_XSC3 || CPU_MOHAWK || CPU_PJ4 || CPU_PJ4B
 	default y if PXA27x || PXA3xx || PXA95x || ARCH_MMP
 	help
 	  Enable support for iWMMXt context switching at run time if
@@ -1405,6 +1413,27 @@ config PL310_ERRATA_769419
 	  on systems with an outer cache, the store buffer is drained
 	  explicitly.
 
+config PJ4B_ERRATA_6315
+       bool "PJ4B errata 6315"
+       depends on CPU_PJ4B
+       help
+	  Replace DMB w. DSB when its necessary to enforce an ordering between an
+	  explicit load/store op and a set/way op.
+
+config PJ4B_ERRATA_6359
+	bool "PJ4B errata 6359"
+	depends on CPU_PJ4B
+	help
+	  Boradcast DMB operations do not fully synchronize local cache hits. This option
+	  replaces all occurences of DMB with DSB.
+
+config PJ4B_ERRATA_6409
+	bool "PJ4B errata 6409"
+	depends on CPU_PJ4B
+	help
+	  IFU predicts-taken a branch, but tells ROB not-taken. This option disable static
+	  branch prediction
+
 endmenu
 
 source "arch/arm/common/Kconfig"
@@ -1581,6 +1610,15 @@ config PAGE_OFFSET
 	default 0x40000000 if VMSPLIT_1G
 	default 0x80000000 if VMSPLIT_2G
 	default 0xC0000000
+
+config TEXT_OFFSET_OVERRIDE
+	bool "Enable CONFIG_TEXT_OFFSET"
+	default n
+
+config TEXT_OFFSET
+	hex "Specific kernel TEXT offset from PAGE_OFFSET"
+	depends on TEXT_OFFSET_OVERRIDE
+	default 0x00008000
 
 config NR_CPUS
 	int "Maximum number of CPUs (2-32)"
@@ -1885,6 +1923,15 @@ config DEPRECATED_PARAM_STRUCT
 	  This was deprecated in 2001 and announced to live on for 5 years.
 	  Some old boot loaders still use this way.
 
+config ARM_FLUSH_CONSOLE_ON_RESTART
+	bool "Force flush the console on restart"
+	help
+	  If the console is locked while the system is rebooted, the messages
+	  in the temporary logbuffer would not have propogated to all the
+	  console drivers. This option forces the console lock to be
+	  released if it failed to be acquired, which will cause all the
+	  pending messages to be flushed.
+
 endmenu
 
 menu "Boot options"
@@ -2026,6 +2073,20 @@ config CMDLINE_FORCE
 	  This is useful if you cannot or don't want to change the
 	  command-line options your boot loader passes to the kernel.
 endchoice
+
+config CMDLINE_INITRD_SIZE_OVERRIDE
+	bool "Override bootloader initrd size"
+	depends on BLK_DEV_INITRD && !CMDLINE_FORCE
+	default n
+	help
+	Override boot loader initrd size argument.
+	This is useful to enlarge initrd size limitation. For example,
+	in Samsung's PXA988 LT02 Development Board limited in 1MB.
+
+config CMDLINE_INITRD_SIZE
+	string "Initrd size"
+	depends on CMDLINE_INITRD_SIZE_OVERRIDE
+	default "5m"
 
 config XIP_KERNEL
 	bool "Kernel Execute-In-Place from ROM"
@@ -2258,6 +2319,10 @@ config NEON
 	  Say Y to include support code for NEON, the ARMv7 Advanced SIMD
 	  Extension.
 
+config GPU_RESERVE_MEM
+	bool "GC video memory allocator"
+	help
+		reserve memory for GC as video memory
 endmenu
 
 menu "Userspace binary formats"
@@ -2283,12 +2348,15 @@ source "kernel/power/Kconfig"
 config ARCH_SUSPEND_POSSIBLE
 	depends on !ARCH_S5PC100
 	depends on CPU_ARM920T || CPU_ARM926T || CPU_SA1100 || \
-		CPU_V6 || CPU_V6K || CPU_V7 || CPU_XSC3 || CPU_XSCALE
+		CPU_V6 || CPU_V6K || CPU_V7 || CPU_XSC3 || CPU_XSCALE || CPU_MOHAWK
 	def_bool y
 
 config ARM_CPU_SUSPEND
 	def_bool PM_SLEEP
 
+config KERNEL_DEBUG_SEC
+	bool
+	default y
 endmenu
 
 source "net/Kconfig"

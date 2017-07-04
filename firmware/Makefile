@@ -140,7 +140,12 @@ fw-shipped-$(CONFIG_USB_SERIAL_XIRCOM) += keyspan_pda/xircom_pgs.fw
 fw-shipped-$(CONFIG_USB_VICAM) += vicam/firmware.fw
 fw-shipped-$(CONFIG_VIDEO_CPIA2) += cpia2/stv0672_vp4.bin
 fw-shipped-$(CONFIG_YAM) += yam/1200.bin yam/9600.bin
-
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/BOOT.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/CORE.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/CONF.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/ARUBA_G1M_CORE53_R20_V09.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/ARUBA_G1F_CORE53_R34_V14.fw
+fw-shipped-$(CONFIG_TOUCHSCREEN_MMS136_TS) += melfas/arubaTD/ARUBA_G1F_CORE53_R30_V07.fw
 fw-shipped-all := $(fw-shipped-y) $(fw-shipped-m) $(fw-shipped-)
 
 # Directories which we _might_ need to create, so we have a rule for them.

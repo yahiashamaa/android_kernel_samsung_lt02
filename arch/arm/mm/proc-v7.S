@@ -69,7 +69,9 @@ ENDPROC(cpu_v7_reset)
  *	IRQs are already disabled.
  */
 ENTRY(cpu_v7_do_idle)
+#ifndef CONFIG_CPU_PJ4B
 	dsb					@ WFI may enter a low-power mode
+#endif
 	wfi
 	mov	pc, lr
 ENDPROC(cpu_v7_do_idle)
@@ -170,6 +172,58 @@ __v7_ca15mp_setup:
 	mcreq	p15, 0, r0, c1, c0, 1
 #endif
 __v7_setup:
+#if defined(CONFIG_CPU_PJ4B) && defined(CONFIG_NEON)
+	mrc	p15, 1, r0, c15, c1, 1
+	orr	r0, r0, #(1 << 11)		@ PJ4B NEON enable bit
+	mcr	p15, 1, r0, c15, c1, 1
+#endif
+#if defined(CONFIG_CPU_MMP3) && defined(CONFIG_NEON)
+	mrc	p15, 0, r5, c1, c0, 2		@ Read coprocessor access
+	mov	r0, r5
+	orr	r0, r0, #0x00f00000		@ Allow access to cp10 and cp11
+	mcr	p15, 0, r0, c1, c0, 2		@ Enable CP10, CP11 coprocessor access
+	mov	r0, #0
+	mcr	p15, 0, r0, c7, c5, 4		@ Flush prefetch buffer
+	mrc	p10, 7, r0, c8, c0, 0
+	orr	r0, r0, #0x40000000
+	mcr	p10, 7, r0, c8, c0, 0		@ Enable FPEXC.EN bit
+	isb
+	mov	r0, #1
+	mcr	p10, 7, r0, c9, c0, 0		@ Enable dual-issue feature in FPCFG.bit0
+	/* Continuous 6 VMOV instructions to initialize the unused second pipe */
+	.word	0xeeb00b00			@ VMOV.F64 d0, #2.00000000
+	.word	0xeeb00b00
+	.word	0xeeb00b00
+	.word	0xeeb00b00
+	.word	0xeeb00b00
+	.word	0xeeb00b00
+	mov	r0, #0
+	mcr	p10, 7, r0, c9, c0, 0		@ Disable dual-issue feature in FPCFG.bit0
+	isb
+	mrc	p10, 7, r0, c8, c0, 0
+	bic	r0, r0, #0x40000000
+	mcr	p10, 7, r0, c8, c0, 0		@ Disable FPEXC.EN bit
+	mcr	p15, 0, r5, c1, c0, 2		@ Disable CP10, CP11 coprocessor access
+	mov	r0, #0
+	mcr	p15, 0, r0, c7, c5, 4		@ Flush prefetch buffer
+#endif
+
+#ifdef CONFIG_PJ4_RETURNSTACK_ISSUE
+	mrc	p15, 1, r0, c15, c1, 1
+	bic	r0, r0, #0x1			@disable return stack
+	mcr	p15, 1, r0, c15, c1, 1
+#endif
+
+#ifdef CONFIG_PJ4B_ERRATA_6409
+	mrc	p15, 1, r0, c15, c1, 1
+	bic	r0, r0, #0x4			@ Disable Static BP
+	mcr	p15, 1, r0, c15, c1, 1
+#endif
+#ifdef CONFIG_DISABLE_CWF
+	mrc	p15, 1, r0, c15, c1, 2
+	orr	r0, r0, #(1 << 27)
+	mcr	p15, 1, r0, c15, c1, 2
+#endif
 	adr	r12, __v7_setup_stack		@ the local stack
 	stmia	r12, {r0-r5, r7, r9, r11, lr}
 	bl	v7_flush_dcache_all
@@ -342,6 +396,17 @@ __v7_ca9mp_proc_info:
 	.long	0xff0ffff0
 	__v7_proc __v7_ca9mp_setup
 	.size	__v7_ca9mp_proc_info, . - __v7_ca9mp_proc_info
+
+	/*
+	 * Marvell. PJ4B processor.
+	 */
+	.type  __v7_pj4b_proc_info, #object
+__v7_pj4b_proc_info:
+	.long  0x562f5840
+	.long  0xfffffff0
+	/* It can used same set up function as ca9mp */
+	__v7_proc __v7_ca9mp_setup
+	.size	__v7_pj4b_proc_info, . - __v7_pj4b_proc_info
 #endif	/* CONFIG_ARM_LPAE */
 
 	/*

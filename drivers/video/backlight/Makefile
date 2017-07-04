@@ -1,6 +1,13 @@
 # Backlight & LCD drivers
 
+ifeq ($(CONFIG_MACH_LT02),y)
 obj-$(CONFIG_LCD_CLASS_DEVICE)     += lcd.o
+else ifeq ($(CONFIG_MACH_COCOA7),y)
+obj-$(CONFIG_LCD_CLASS_DEVICE)     += lcd.o
+else
+# obj-$(CONFIG_LCD_CLASS_DEVICE)     += lcd.o
+endif
+
 obj-$(CONFIG_LCD_CORGI)		   += corgi_lcd.o
 obj-$(CONFIG_LCD_HP700)		   += jornada720_lcd.o
 obj-$(CONFIG_LCD_L4F00242T03)	   += l4f00242t03.o
@@ -27,7 +34,13 @@ obj-$(CONFIG_BACKLIGHT_OMAP1)	+= omap1_bl.o
 obj-$(CONFIG_BACKLIGHT_PANDORA)	+= pandora_bl.o
 obj-$(CONFIG_BACKLIGHT_PROGEAR) += progear_bl.o
 obj-$(CONFIG_BACKLIGHT_CARILLO_RANCH) += cr_bllcd.o
+
+ifeq ($(CONFIG_BACKLIGHT_TPS61165), y)
+obj-$(CONFIG_BACKLIGHT_PWM)	+= pwm_tps61165.o
+else
 obj-$(CONFIG_BACKLIGHT_PWM)	+= pwm_bl.o
+endif
+
 obj-$(CONFIG_BACKLIGHT_DA903X)	+= da903x_bl.o
 obj-$(CONFIG_BACKLIGHT_DA9052)	+= da9052_bl.o
 obj-$(CONFIG_BACKLIGHT_MAX8925)	+= max8925_bl.o
@@ -38,6 +51,8 @@ obj-$(CONFIG_BACKLIGHT_WM831X)	+= wm831x_bl.o
 obj-$(CONFIG_BACKLIGHT_ADP5520)	+= adp5520_bl.o
 obj-$(CONFIG_BACKLIGHT_ADP8860)	+= adp8860_bl.o
 obj-$(CONFIG_BACKLIGHT_ADP8870)	+= adp8870_bl.o
+obj-$(CONFIG_BACKLIGHT_KTD253)	+= ktd253_bl.o
+obj-$(CONFIG_BACKLIGHT_LDIPWM) += ldi_pwm_bl.o
 obj-$(CONFIG_BACKLIGHT_88PM860X) += 88pm860x_bl.o
 obj-$(CONFIG_BACKLIGHT_PCF50633)	+= pcf50633-backlight.o
 obj-$(CONFIG_BACKLIGHT_AAT2870) += aat2870_bl.o

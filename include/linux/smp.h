@@ -72,6 +72,7 @@ extern void smp_cpus_done(unsigned int max_cpus);
  * Call a function on all other processors
  */
 int smp_call_function(smp_call_func_t func, void *info, int wait);
+void wait_smp_call_complete(void);
 void smp_call_function_many(const struct cpumask *mask,
 			    smp_call_func_t func, void *info, bool wait);
 

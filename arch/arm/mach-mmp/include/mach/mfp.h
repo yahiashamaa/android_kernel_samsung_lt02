@@ -21,9 +21,11 @@
 
 #undef MFP_CFG
 #undef MFP_CFG_DRV
-#undef MFP_CFG_LPM
-#undef MFP_CFG_X
-#undef MFP_CFG_DEFAULT
+
+#define MFP_VERY_SLOW		MFP_DS01X
+#define MFP_SLOW		MFP_DS02X
+#define MFP_MEDIUM		MFP_DS03X
+#define MFP_FAST		MFP_DS04X
 
 #define MFP_CFG(pin, af)		\
 	(MFP_LPM_FLOAT | MFP_PIN(MFP_PIN_##pin) | MFP_##af | MFP_DRIVE_MEDIUM)

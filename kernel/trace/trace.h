@@ -329,6 +329,8 @@ struct dentry *trace_create_file(const char *name,
 struct dentry *tracing_init_dentry(void);
 
 struct ring_buffer_event;
+extern unsigned char enable_change_trace_buffer;
+extern unsigned char non_cache_set;
 
 struct ring_buffer_event *
 trace_buffer_lock_reserve(struct ring_buffer *buffer,

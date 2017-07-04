@@ -24,4 +24,14 @@ config SENSORS_HMC5843
 	  To compile this driver as a module, choose M here: the module
 	  will be called hmc5843
 
+config INV_MMC328X_IIO
+    tristate "Invensense IIO driver for Memsic MMC328x compass"
+    depends on I2C && SYSFS && IIO && IIO_KFIFO_BUF
+    default n
+    help
+      This driver supports the Memsic MMC328x compass. It is the Invensense
+      IIO implementation for the MMC328x compass device.
+      This driver can be built as a module. The module will be called
+      inv-mmc328x-iio.
+
 endmenu

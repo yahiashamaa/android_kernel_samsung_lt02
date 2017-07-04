@@ -243,6 +243,9 @@ void cpufreq_notify_transition(struct cpufreq_freqs *freqs, unsigned int state)
 
 	BUG_ON(irqs_disabled());
 
+	if (!cpufreq_driver)
+		return;
+
 	freqs->flags = cpufreq_driver->flags;
 	pr_debug("notification %u of frequency transition to %u kHz\n",
 		state, freqs->new);
@@ -607,6 +610,15 @@ static struct attribute *default_attrs[] = {
 };
 
 struct kobject *cpufreq_global_kobject;
+struct kset *cpufreq_kset;
+static int cpufreq_uevent_filter(struct kset *kset, struct kobject *kobj)
+{
+	return 1;
+}
+
+static const struct kset_uevent_ops cpufreq_uevent_ops = {
+	.filter = cpufreq_uevent_filter,
+};
 EXPORT_SYMBOL(cpufreq_global_kobject);
 
 #define to_policy(k) container_of(k, struct cpufreq_policy, kobj)
@@ -1711,11 +1723,14 @@ static int __cpufreq_set_policy(struct cpufreq_policy *data,
 					data->governor = old_gov;
 					__cpufreq_governor(data,
 							   CPUFREQ_GOV_START);
+					kobject_uevent(cpufreq_global_kobject,
+							KOBJ_ADD);
 				}
 				ret = -EINVAL;
 				goto error_out;
 			}
 			/* might be a policy change, too, so fall through */
+			kobject_uevent(cpufreq_global_kobject, KOBJ_ADD);
 		}
 		pr_debug("governor: change or update limits\n");
 		__cpufreq_governor(data, CPUFREQ_GOV_LIMITS);
@@ -1930,7 +1945,11 @@ static int __init cpufreq_core_init(void)
 		init_rwsem(&per_cpu(cpu_policy_rwsem, cpu));
 	}
 
+	cpufreq_kset = kset_create_and_add("cpufreq", &cpufreq_uevent_ops,
+					   NULL);
+
 	cpufreq_global_kobject = kobject_create_and_add("cpufreq", &cpu_subsys.dev_root->kobj);
+	cpufreq_global_kobject->kset = cpufreq_kset;
 	BUG_ON(!cpufreq_global_kobject);
 	register_syscore_ops(&cpufreq_syscore_ops);
 

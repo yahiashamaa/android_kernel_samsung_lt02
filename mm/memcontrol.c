@@ -5013,7 +5013,7 @@ mem_cgroup_create(struct cgroup *cont)
 	if (parent)
 		memcg->swappiness = mem_cgroup_swappiness(parent);
 	atomic_set(&memcg->refcnt, 1);
-	memcg->move_charge_at_immigrate = 0;
+	memcg->move_charge_at_immigrate = 1;
 	mutex_init(&memcg->thresholds_lock);
 	spin_lock_init(&memcg->move_lock);
 	return &memcg->css;

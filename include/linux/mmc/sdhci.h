@@ -91,13 +91,21 @@ struct sdhci_host {
 	unsigned int quirks2;	/* More deviations from spec. */
 
 #define SDHCI_QUIRK2_HOST_OFF_CARD_ON			(1<<0)
+/* Some SDHCI v3 controller doesn't suppport current limit error*/
+#define SDHCI_QUIRK2_NO_CURRENT_LIMIT                  	(1<<1)
+#define SDHCI_QUIRK2_PRESET_VALUE_BROKEN               	(1<<2)
+/* Controller data timeout counter is 4 times long as spec defined */
+#define SDHCI_QUIRK2_TIMEOUT_DIVIDE_4			(1<<3)
+/* After SD host request, prevent system to suspend state for a while */
+#define SDHCI_QUIRK2_HOLDSUSPEND_AFTER_REQUEST	(1<<4)
 
 	int irq;		/* Device IRQ */
 	void __iomem *ioaddr;	/* Mapped address */
 
 	const struct sdhci_ops *ops;	/* Low level hw interface */
 
-	struct regulator *vmmc;	/* Power regulator */
+	struct regulator *vmmc;		/* Power regulator (vmmc) */
+	struct regulator *vqmmc;	/* Signaling regulator (vccq) */
 
 	/* Internal data */
 	struct mmc_host *mmc;	/* MMC structure */
@@ -122,6 +130,7 @@ struct sdhci_host {
 #define SDHCI_PV_ENABLED	(1<<8)	/* Preset value enabled */
 #define SDHCI_SDIO_IRQ_ENABLED	(1<<9)	/* SDIO irq enabled */
 #define SDHCI_HS200_NEEDS_TUNING (1<<10)	/* HS200 needs tuning */
+#define SDHCI_USING_RETUNING_TIMER (1<<11)	/* Host is using a retuning timer for the card */
 
 	unsigned int version;	/* SDHCI spec. version */
 
@@ -155,7 +164,8 @@ struct sdhci_host {
 
 	struct timer_list timer;	/* Timer for timeouts */
 
-	unsigned int caps;	/* Alternative capabilities */
+	unsigned int caps;	/* Alternative CAPABILITY_0 */
+	unsigned int caps1;	/* Alternative CAPABILITY_1 */
 
 	unsigned int            ocr_avail_sdio;	/* OCR bit masks */
 	unsigned int            ocr_avail_sd;
@@ -168,6 +178,25 @@ struct sdhci_host {
 	unsigned int		tuning_mode;	/* Re-tuning mode supported by host */
 #define SDHCI_TUNING_MODE_1	0
 	struct timer_list	tuning_timer;	/* Timer for tuning */
+	int	constrain_ref;
+
+	/*
+	* A workaroud to improve the muti-blocks R/W performance
+	* Example:
+	* The user APP iperf doesn't claim system suspend lock in some case,
+	* so the system may enter to suspend state even iperf is running.
+	* And the iperf throughput test result would decrease.
+	*
+	* If R/W are called so frequently, we use this timeout wakelock to
+	* pervent suspend. But if the R/W stops for a while, the wakelock
+	* will be releaseed and system has chance to enter suspend.
+	*
+	* if the system want to support this feature,
+	* set "SDHCI_QUIRK_HOLDSUSPEND_AFTER_REQUEST" in the quirks2
+	*/
+	struct wake_lock muti_trans_lock;
+	int	muti_trans_lock_en;
+	int	muti_trans_timeout;
 
 	unsigned long private[0] ____cacheline_aligned;
 };

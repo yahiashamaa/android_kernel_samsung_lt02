@@ -53,6 +53,7 @@
 #include <asm/uaccess.h>
 #include <asm/io.h>
 #include <asm/unistd.h>
+#include <linux/mfd/88pm80x.h>
 
 #ifndef SET_UNALIGN_CTL
 # define SET_UNALIGN_CTL(a,b)	(-EINVAL)
@@ -122,6 +123,54 @@ EXPORT_SYMBOL(cad_pid);
  */
 
 void (*pm_power_off_prepare)(void);
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+int sec_check_execpath(struct mm_struct *mm, char *denypath);
+#if defined CONFIG_SEC_RESTRICT_ROOTING_LOG
+#define PRINT_LOG(...)	printk(KERN_ERR __VA_ARGS__)
+#else
+#define PRINT_LOG(...)
+#endif	// End of CONFIG_SEC_RESTRICT_ROOTING_LOG
+
+static int sec_restrict_uid(void)
+{
+	int ret = 0;
+	struct task_struct *parent_tsk;
+	const struct cred *parent_cred;
+
+	read_lock(&tasklist_lock);
+	parent_tsk = current->parent;
+	if (!parent_tsk) {
+		read_unlock(&tasklist_lock);
+		return 0;
+	}
+
+	get_task_struct(parent_tsk);
+	/* holding on to the task struct is enough so just release
+	 * the tasklist lock here */
+	read_unlock(&tasklist_lock);
+
+	parent_cred = get_task_cred(parent_tsk);
+	if (!parent_cred)
+		goto out;
+	if (parent_cred->euid == 0 || parent_tsk->pid == 1) {
+		ret = 0;
+	} else if (sec_check_execpath(current->mm, "/system/bin/pppd")) {
+		PRINT_LOG("VPN allowed to use root permission");
+		ret = 0;
+	} else {
+		PRINT_LOG("Restricted changing UID. PID = %d(%s) PPID = %d(%s)\n",
+			current->pid, current->comm,
+			parent_tsk->pid, parent_tsk->comm);
+		ret = 1;
+	}
+	put_cred(parent_cred);
+out:
+	put_task_struct(parent_tsk);
+
+	return ret;
+}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 /*
  * Returns true if current's euid is same as p's uid or euid,
@@ -354,6 +403,8 @@ int unregister_reboot_notifier(struct notifier_block *nb)
 }
 EXPORT_SYMBOL(unregister_reboot_notifier);
 
+
+#define PM800_USER_DATA3 0xEA
 /**
  *	kernel_restart - reboot the system
  *	@cmd: pointer to buffer containing command to execute for restart
@@ -364,7 +415,85 @@ EXPORT_SYMBOL(unregister_reboot_notifier);
  */
 void kernel_restart(char *cmd)
 {
+
+	int suddlmod_number =0;
+	unsigned char pmic_download_register = 0;
+	unsigned char pmic_register = 0;	
+	
 	kernel_restart_prepare(cmd);
+
+	if (!(cmd && !strcmp(cmd,"panic")))	
+      {
+#if defined (CONFIG_MFD_88PM800)
+	if (cmd && (0 == strcmp(cmd, "recovery"))) 
+	{
+		printk("Enter recovery mode\n");
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FULL_RESET);
+	} 
+	else if (cmd && (0 == strcmp(cmd, "arm11_fota"))) 
+	{
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FOTA);
+		printk("Enter arm11_fota mode\n");
+	}
+	else if (cmd && (0 == strcmp(cmd, "alarm"))) 
+	{
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_RTC_ALARM);
+		printk("Enter alarm mode\n");
+	}
+	else if (cmd && (0 == strncmp(cmd, "debug",5))) 
+	{
+		if(cmd && (0 == strcmp(cmd, "debug0x4f4c"))) 
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_LOW);
+
+		if(cmd && (0 == strcmp(cmd, "debug0x494d"))) 
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_MID);
+
+		if(cmd && (0 == strcmp(cmd, "debug0x4948"))) 
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_HIGH);
+
+		printk("Enter debug setting mode\n");
+	}
+	else if ((cmd == NULL) || (0 == strcmp(cmd, "GlobalActions restart")) )
+	{
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
+		printk("Enter intended reset mode\n");
+	}
+	else
+	{
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
+		printk("Enter hw reset mode\n");
+	}
+#endif
+     }
+#ifdef CONFIG_CPU_PXA988
+		if(cmd && (0==strcmp(cmd,"download"))){
+			pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_FUS;
+			pmic_register =(pmic_download_register<<4)&0xF0;
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
+			
+			printk(KERN_EMERG "pmic_download_register FUS : %d \n",pmic_download_register);
+		}
+		else if (cmd && (0==strncmp(cmd,"sud", 3))){
+			suddlmod_number = *(cmd+3); //0x38
+			switch(suddlmod_number){				
+				case 0x31: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD1; break;
+				case 0x32: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD2; break;
+				case 0x33: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD3; break;
+				case 0x34: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD4; break;
+				case 0x35: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD5; break;
+				case 0x36: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD6; break;
+				case 0x37: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD7; break;
+				case 0x38: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD8; break;
+				case 0x39: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD9; break;
+				default : pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_NONE; break;
+			}
+			pmic_register =(pmic_download_register<<4)&0xF0;
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
+			printk(KERN_EMERG "pmic_download_register SUDDLMOD : %d \n",pmic_download_register);
+		}
+		
+#endif		
+
 	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
 	else
@@ -557,6 +686,14 @@ SYSCALL_DEFINE2(setregid, gid_t, rgid, gid_t, egid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(rgid == 0 || egid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -603,6 +740,14 @@ SYSCALL_DEFINE1(setgid, gid_t, gid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(gid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -674,6 +819,14 @@ SYSCALL_DEFINE2(setreuid, uid_t, ruid, uid_t, euid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(ruid == 0 || euid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -735,6 +888,14 @@ SYSCALL_DEFINE1(setuid, uid_t, uid)
 	struct cred *new;
 	int retval;
 
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(uid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
+
 	new = prepare_creds();
 	if (!new)
 		return -ENOMEM;
@@ -775,6 +936,14 @@ SYSCALL_DEFINE3(setresuid, uid_t, ruid, uid_t, euid, uid_t, suid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(ruid == 0 || euid == 0 || suid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -840,6 +1009,14 @@ SYSCALL_DEFINE3(setresgid, gid_t, rgid, gid_t, egid, gid_t, sgid)
 	const struct cred *old;
 	struct cred *new;
 	int retval;
+
+#if defined CONFIG_SEC_RESTRICT_SETUID
+	if(rgid == 0 || egid == 0 || sgid == 0)
+	{
+		if(sec_restrict_uid())
+			return -EACCES;
+	}
+#endif // End of CONFIG_SEC_RESTRICT_SETUID
 
 	new = prepare_creds();
 	if (!new)
@@ -1179,15 +1356,16 @@ DECLARE_RWSEM(uts_sem);
  * Work around broken programs that cannot handle "Linux 3.0".
  * Instead we map 3.x to 2.6.40+x, so e.g. 3.0 would be 2.6.40
  */
-static int override_release(char __user *release, int len)
+static int override_release(char __user *release, size_t len)
 {
 	int ret = 0;
-	char buf[65];
 
 	if (current->personality & UNAME26) {
-		char *rest = UTS_RELEASE;
+		const char *rest = UTS_RELEASE;
+		char buf[65] = { 0 };
 		int ndots = 0;
 		unsigned v;
+		size_t copy;
 
 		while (*rest) {
 			if (*rest == '.' && ++ndots >= 3)
@@ -1197,8 +1375,9 @@ static int override_release(char __user *release, int len)
 			rest++;
 		}
 		v = ((LINUX_VERSION_CODE >> 8) & 0xff) + 40;
-		snprintf(buf, len, "2.6.%u%s", v, rest);
-		ret = copy_to_user(release, buf, len);
+		copy = min(sizeof(buf), max_t(size_t, 1, len));
+		copy = scnprintf(buf, copy, "2.6.%u%s", v, rest);
+		ret = copy_to_user(release, buf, copy + 1);
 	}
 	return ret;
 }
@@ -2038,7 +2217,7 @@ int orderly_poweroff(bool force)
 
 	call_usermodehelper_setfns(info, NULL, argv_cleanup, NULL);
 
-	ret = call_usermodehelper_exec(info, UMH_NO_WAIT);
+	ret = call_usermodehelper_exec(info, UMH_WAIT_PROC);
 
   out:
 	if (ret && force) {

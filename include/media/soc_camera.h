@@ -35,6 +35,7 @@ struct soc_camera_device {
 	s32 user_height;
 	u32 bytesperline;		/* for padding, zero if unused */
 	u32 sizeimage;
+	u32 state;			/* state if soc camera formated */
 	enum v4l2_colorspace colorspace;
 	unsigned char iface;		/* Host number */
 	unsigned char devnum;		/* Device number per host */
@@ -55,6 +56,11 @@ struct soc_camera_device {
 		struct vb2_queue vb2_vidq;
 	};
 };
+
+#define SOCAM_STATE_UNKNOWN	0
+#define SOCAM_STATE_STANDBY	1
+#define SOCAM_STATE_FORMATED	2
+#define SOCAM_STATE_STREAM	3
 
 struct soc_camera_host {
 	struct v4l2_device v4l2_dev;

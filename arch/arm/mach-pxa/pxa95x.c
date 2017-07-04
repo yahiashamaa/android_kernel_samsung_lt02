@@ -18,6 +18,12 @@
 #include <linux/irq.h>
 #include <linux/io.h>
 #include <linux/syscore_ops.h>
+#include <linux/memblock.h>
+
+#ifdef CONFIG_CACHE_L2X0
+#include <asm/hardware/cache-l2x0.h>
+#endif
+#include <asm/cacheflush.h>
 
 #include <mach/hardware.h>
 #include <mach/pxa3xx-regs.h>
@@ -29,6 +35,21 @@
 #include "generic.h"
 #include "devices.h"
 #include "clock.h"
+
+static int boot_flash_type;
+int pxa_boot_flash_type_get(void)
+{
+	return boot_flash_type;
+}
+
+static int __init setup_boot_flash_type(char *p)
+{
+	boot_flash_type  = memparse(p, &p);
+	printk(KERN_INFO "setup_boot_flash_type: boot_flash_type=%d",
+		boot_flash_type);
+	return 1;
+}
+__setup("FLAS=", setup_boot_flash_type);
 
 static struct mfp_addr_map pxa95x_mfp_addr_map[] __initdata = {
 
@@ -198,12 +219,30 @@ static struct mfp_addr_map pxa95x_mfp_addr_map[] __initdata = {
 	MFP_ADDR_END,
 };
 
+static struct mfp_addr_map pxa978_mfp_addr_map[] __initdata = {
+	/*PMIC interrupt pin*/
+	MFP_ADDR(PMIC_INT, 0x204),
+
+	/* MFP Pins*/
+	MFP_ADDR_X(GPIO0, GPIO132, 0x208),
+
+	/* RF MFP Pins */
+	MFP_ADDR_X(RF_MFP0, RF_MFP30, 0x460),
+
+	/* MEM MFP Pins */
+	MFP_ADDR_X(MEM_MFP0, MEM_MFP39, 0x500),
+
+	MFP_ADDR_END,
+};
+
 static DEFINE_CK(pxa95x_lcd, LCD, &clk_pxa3xx_hsio_ops);
 static DEFINE_CLK(pxa95x_pout, &clk_pxa3xx_pout_ops, 13000000, 70);
 static DEFINE_PXA3_CKEN(pxa95x_ffuart, FFUART, 14857000, 1);
 static DEFINE_PXA3_CKEN(pxa95x_btuart, BTUART, 14857000, 1);
 static DEFINE_PXA3_CKEN(pxa95x_stuart, STUART, 14857000, 1);
 static DEFINE_PXA3_CKEN(pxa95x_i2c, I2C, 32842000, 0);
+static DEFINE_PXA3_CKEN(pxa95x_i2c1, I2C2, 32842000, 0);
+static DEFINE_PXA3_CKEN(pxa95x_i2c2, I2C3, 32842000, 0);
 static DEFINE_PXA3_CKEN(pxa95x_keypad, KEYPAD, 32768, 0);
 static DEFINE_PXA3_CKEN(pxa95x_ssp1, SSP1, 13000000, 0);
 static DEFINE_PXA3_CKEN(pxa95x_ssp2, SSP2, 13000000, 0);
@@ -223,6 +262,8 @@ static struct clk_lookup pxa95x_clkregs[] = {
 	INIT_CLKREG(&clk_pxa95x_stuart, "pxa2xx-uart.2", NULL),
 	INIT_CLKREG(&clk_pxa95x_stuart, "pxa2xx-ir", "UARTCLK"),
 	INIT_CLKREG(&clk_pxa95x_i2c, "pxa2xx-i2c.0", NULL),
+	INIT_CLKREG(&clk_pxa95x_i2c1, "pxa2xx-i2c.1", NULL),
+	INIT_CLKREG(&clk_pxa95x_i2c2, "pxa2xx-i2c.2", NULL),
 	INIT_CLKREG(&clk_pxa95x_keypad, "pxa27x-keypad", NULL),
 	INIT_CLKREG(&clk_pxa95x_ssp1, "pxa27x-ssp.0", NULL),
 	INIT_CLKREG(&clk_pxa95x_ssp2, "pxa27x-ssp.1", NULL),
@@ -238,6 +279,35 @@ void __init pxa95x_init_irq(void)
 {
 	pxa_init_irq(96, NULL);
 }
+
+void pxa_boot_flash_init(int sync_mode)
+{
+	int boot_flash_type;
+
+	/* Get boot flash type from OBM */
+	boot_flash_type = pxa_boot_flash_type_get();
+	switch (boot_flash_type) {
+	case NAND_FLASH:
+#ifdef CONFIG_MTD_NAND
+		nand_init();
+#endif
+		break;
+	case ONENAND_FLASH:
+#ifdef CONFIG_MTD_ONENAND
+		/* 1 sync read, 0  async read */
+		onenand_init(sync_mode);
+#endif
+		break;
+	case SDMMC_FLASH:
+		/* ShukiZ: TODO, check how to init
+			eMMC vs. external MMC device */
+		break;
+	default:
+		printk(KERN_ERR "boot flash type not supported: %d",
+			boot_flash_type);
+	}
+}
+EXPORT_SYMBOL(pxa_boot_flash_init);
 
 /*
  * device registration specific to PXA93x.
@@ -260,13 +330,86 @@ static struct platform_device *devices[] __initdata = {
 	&pxa27x_device_pwm1,
 };
 
+#define CP_MEM_MAX_SEGMENTS 2
+unsigned _cp_area_addr[CP_MEM_MAX_SEGMENTS];
+unsigned _cp_area_size[CP_MEM_MAX_SEGMENTS+1]; /* last entry 0 */
+static int __init setup_cpmem(char *p)
+{
+	unsigned long size, start = 0xa7000000;
+	int seg;
+
+	size  = memparse(p, &p);
+	if (*p == '@')
+		start = memparse(p + 1, &p);
+
+	for (seg = 0; seg < CP_MEM_MAX_SEGMENTS; seg++)
+		if (!_cp_area_size[seg])
+			break;
+	BUG_ON(seg == CP_MEM_MAX_SEGMENTS);
+	_cp_area_addr[seg] = (unsigned)start;
+	_cp_area_size[seg] = (unsigned)size;
+	return 0;
+}
+early_param("cpmem", setup_cpmem);
+
+unsigned cp_area_addr(void)
+{
+	/* _cp_area_addr[] contain actual CP region addresses for reservation.
+	This function returns the address of the first region, which is
+	the main one used for AP-CP interface, aligned to 16MB.
+	The AP-CP interface code takes care of the offsets inside the region,
+	including the non-CP area at the beginning of the 16MB aligned range. */
+	return _cp_area_addr[0]&0xFF000000;
+}
+EXPORT_SYMBOL(cp_area_addr);
+
+void pxa95x_cpmem_reserve(void)
+{
+	int seg;
+
+	/* reserve cpmem */
+	for (seg = 0; seg < CP_MEM_MAX_SEGMENTS; seg++) {
+		if (_cp_area_size[seg] != 0) {
+			BUG_ON(memblock_reserve(_cp_area_addr[seg], _cp_area_size[seg]));
+			memblock_free(_cp_area_addr[seg], _cp_area_size[seg]);
+			memblock_remove(_cp_area_addr[seg], _cp_area_size[seg]);
+			printk(KERN_INFO "Reserving CP memory: %dM at %.8x\n",
+				(unsigned)_cp_area_size[seg]/0x100000,
+				(unsigned)_cp_area_addr[seg]);
+		}
+	}
+}
+
+void pxa95x_mem_reserve(void)
+{
+	pxa95x_cpmem_reserve();
+}
+
 static int __init pxa95x_init(void)
 {
-	int ret = 0, i;
+	int ret = 0;
 
 	if (cpu_is_pxa95x()) {
+
+#ifdef CONFIG_CACHE_L2X0
+		if (cpu_is_pxa978()) {
+			void *l2x0_base = ioremap_nocache(0x58120000, 0x1000);
+			if (!l2x0_base)
+				return -ENOMEM;
+
+			/* Enable power features in contrller */
+			writel_relaxed(0x3, l2x0_base + L2X0_POWER_CTRL);
+
+			/* Args 1,2: don't change AUX_CTRL */
+			l2x0_init(l2x0_base, 0x30000000, ~0);
+		}
+#endif
+
 		mfp_init_base(io_p2v(MFPR_BASE));
-		mfp_init_addr(pxa95x_mfp_addr_map);
+		if (cpu_is_pxa978())
+			mfp_init_addr(pxa978_mfp_addr_map);
+		else
+			mfp_init_addr(pxa95x_mfp_addr_map);
 
 		reset_status = ARSR;
 
@@ -287,6 +430,9 @@ static int __init pxa95x_init(void)
 		register_syscore_ops(&pxa3xx_clock_syscore_ops);
 
 		ret = platform_add_devices(devices, ARRAY_SIZE(devices));
+
+		pxa_set_ffuart_info(NULL);
+		pxa_set_stuart_info(NULL);
 	}
 
 	return ret;

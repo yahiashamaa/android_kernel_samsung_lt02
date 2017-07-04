@@ -7,3 +7,6 @@ obj-$(CONFIG_UIO_SERCOS3)	+= uio_sercos3.o
 obj-$(CONFIG_UIO_PCI_GENERIC)	+= uio_pci_generic.o
 obj-$(CONFIG_UIO_NETX)	+= uio_netx.o
 obj-$(CONFIG_UIO_PRUSS)         += uio_pruss.o
+obj-$(CONFIG_UIO_HDMI) += uio_hdmi.o
+obj-$(CONFIG_UIO_CODA7542)	+= uio_coda7542.o
+obj-$(CONFIG_UIO_MVISP) += uio_mvisp.o

@@ -6,3 +6,5 @@ obj-$(CONFIG_DEVFREQ_GOV_USERSPACE)	+= governor_userspace.o
 
 # DEVFREQ Drivers
 obj-$(CONFIG_ARM_EXYNOS4_BUS_DEVFREQ)	+= exynos4_bus.o
+obj-$(CONFIG_VPU_DEVFREQ)     += devfreq-vpu.o
+obj-$(CONFIG_DDR_DEVFREQ)		+= mck4_memorybus.o

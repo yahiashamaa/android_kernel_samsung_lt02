@@ -171,7 +171,8 @@ static int soc_camera_try_fmt(struct soc_camera_device *icd,
 		pixfmtstr(pix->pixelformat), pix->width, pix->height);
 
 	pix->bytesperline = 0;
-	pix->sizeimage = 0;
+	if (pix->pixelformat != V4L2_PIX_FMT_JPEG)
+		pix->sizeimage = 0;
 
 	ret = ici->ops->try_fmt(icd, f);
 	if (ret < 0)
@@ -487,7 +488,12 @@ static int soc_camera_set_fmt(struct soc_camera_device *icd,
 		icd->user_width, icd->user_height);
 
 	/* set physical bus parameters */
-	return ici->ops->set_bus_param(icd);
+	ret = ici->ops->set_bus_param(icd);
+	if (ret < 0)
+		return ret;
+
+	icd->state = SOCAM_STATE_FORMATED;
+	return 0;
 }
 
 static int soc_camera_open(struct file *file)
@@ -513,18 +519,9 @@ static int soc_camera_open(struct file *file)
 
 	/* Now we really have to activate the camera */
 	if (icd->use_count == 1) {
-		/* Restore parameters before the last close() per V4L2 API */
-		struct v4l2_format f = {
-			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
-			.fmt.pix = {
-				.width		= icd->user_width,
-				.height		= icd->user_height,
-				.field		= icd->field,
-				.colorspace	= icd->colorspace,
-				.pixelformat	=
-					icd->current_fmt->host_fmt->fourcc,
-			},
-		};
+		ret = soc_camera_power_on(icd, icl);
+		if (ret < 0)
+			goto epower;
 
 		/* The camera could have been already on, try to reset */
 		if (icl->reset)
@@ -539,24 +536,10 @@ static int soc_camera_open(struct file *file)
 			goto eiciadd;
 		}
 
-		ret = soc_camera_power_on(icd, icl);
-		if (ret < 0)
-			goto epower;
-
 		pm_runtime_enable(&icd->vdev->dev);
 		ret = pm_runtime_resume(&icd->vdev->dev);
 		if (ret < 0 && ret != -ENOSYS)
 			goto eresume;
-
-		/*
-		 * Try to configure with default parameters. Notice: this is the
-		 * very first open, so, we cannot race against other calls,
-		 * apart from someone else calling open() simultaneously, but
-		 * .video_lock is protecting us against it.
-		 */
-		ret = soc_camera_set_fmt(icd, &f);
-		if (ret < 0)
-			goto esfmt;
 
 		if (ici->ops->init_videobuf) {
 			ici->ops->init_videobuf(&icd->vb_vidq, icd);
@@ -566,6 +549,7 @@ static int soc_camera_open(struct file *file)
 				goto einitvb;
 		}
 		v4l2_ctrl_handler_setup(&icd->ctrl_handler);
+		icd->state = SOCAM_STATE_STANDBY;
 	}
 
 	file->private_data = icd;
@@ -578,13 +562,12 @@ static int soc_camera_open(struct file *file)
 	 * and use_count == 1
 	 */
 einitvb:
-esfmt:
 	pm_runtime_disable(&icd->vdev->dev);
 eresume:
-	soc_camera_power_off(icd, icl);
-epower:
 	ici->ops->remove(icd);
 eiciadd:
+	soc_camera_power_off(icd, icl);
+epower:
 	icd->use_count--;
 	module_put(ici->ops->owner);
 
@@ -614,6 +597,8 @@ static int soc_camera_close(struct file *file)
 		icd->streamer = NULL;
 
 	module_put(ici->ops->owner);
+
+	icd->state = SOCAM_STATE_UNKNOWN;
 
 	dev_dbg(icd->pdev, "camera device close\n");
 
@@ -794,14 +779,43 @@ static int soc_camera_streamon(struct file *file, void *priv,
 	if (icd->streamer != file)
 		return -EBUSY;
 
+	if (icd->state != SOCAM_STATE_FORMATED) {
+		/* Restore parameters before the last close() per V4L2 API */
+		struct v4l2_format f = {
+			.type = V4L2_BUF_TYPE_VIDEO_CAPTURE,
+			.fmt.pix = {
+				.width		= icd->user_width,
+				.height		= icd->user_height,
+				.field		= icd->field,
+				.colorspace	= icd->colorspace,
+				.pixelformat	=
+					icd->current_fmt->host_fmt->fourcc,
+			},
+		};
+
+		/*
+		 * Try to configure with default parameters. Notice: this is the
+		 * very first open, so, we cannot race against other calls,
+		 * apart from someone else calling open() simultaneously, but
+		 * .video_lock is protecting us against it.
+		 */
+		ret = soc_camera_set_fmt(icd, &f);
+		if (ret < 0)
+			return ret;
+	}
+
+	v4l2_subdev_call(sd, video, s_stream, 1);//zswan add it
+
 	/* This calls buf_queue from host driver's videobuf_queue_ops */
 	if (ici->ops->init_videobuf)
 		ret = videobuf_streamon(&icd->vb_vidq);
 	else
 		ret = vb2_streamon(&icd->vb2_vidq, i);
 
-	if (!ret)
-		v4l2_subdev_call(sd, video, s_stream, 1);
+	//if (!ret)
+		//v4l2_subdev_call(sd, video, s_stream, 1);
+
+	icd->state = SOCAM_STATE_STREAM;
 
 	return ret;
 }
@@ -831,6 +845,8 @@ static int soc_camera_streamoff(struct file *file, void *priv,
 		vb2_streamoff(&icd->vb2_vidq, i);
 
 	v4l2_subdev_call(sd, video, s_stream, 0);
+
+	icd->state = SOCAM_STATE_FORMATED;
 
 	return 0;
 }

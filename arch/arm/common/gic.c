@@ -50,6 +50,8 @@ union gic_base {
 	void __percpu __iomem **percpu_base;
 };
 
+static void __iomem *common_base_store;
+
 struct gic_chip_data {
 	union gic_base dist_base;
 	union gic_base cpu_base;
@@ -80,6 +82,7 @@ struct irq_chip gic_arch_extn = {
 	.irq_retrigger	= NULL,
 	.irq_set_type	= NULL,
 	.irq_set_wake	= NULL,
+	.irq_set_affinity = NULL,
 };
 
 #ifndef MAX_GIC_NR
@@ -150,6 +153,20 @@ static void gic_mask_irq(struct irq_data *d)
 		gic_arch_extn.irq_mask(d);
 	raw_spin_unlock(&irq_controller_lock);
 }
+
+void gic_dump(void)
+{
+	u32 val;
+//	int i = 0;
+	raw_spin_lock(&irq_controller_lock);
+//	for(;i<4;i++) {
+		val = readl_relaxed(common_base_store + GIC_DIST_ENABLE_CLEAR + 2 * 4);
+		printk("*** gic[%d]: %x\n", 2, val);
+//	}
+	raw_spin_unlock(&irq_controller_lock);
+
+}
+EXPORT_SYMBOL_GPL(gic_dump);
 
 static void gic_unmask_irq(struct irq_data *d)
 {
@@ -245,6 +262,10 @@ static int gic_set_affinity(struct irq_data *d, const struct cpumask *mask_val,
 	bit = 1 << (cpu_logical_map(cpu) + shift);
 
 	raw_spin_lock(&irq_controller_lock);
+
+	if (gic_arch_extn.irq_set_affinity)
+		gic_arch_extn.irq_set_affinity(d, mask_val, false);
+
 	val = readl_relaxed(reg) & ~mask;
 	writel_relaxed(val | bit, reg);
 	raw_spin_unlock(&irq_controller_lock);
@@ -374,6 +395,10 @@ static void __init gic_dist_init(struct gic_chip_data *gic)
 	 */
 	for (i = 32; i < gic_irqs; i += 4)
 		writel_relaxed(0xa0a0a0a0, base + GIC_DIST_PRI + i * 4 / 4);
+
+#ifdef CONFIG_EOF_FC_WORKAROUND
+	writel_relaxed(0xa0a090a0, base + GIC_DIST_PRI + 0x48);
+#endif
 
 	/*
 	 * Disable all interrupts.  Leave the PPI and SGIs alone
@@ -678,6 +703,7 @@ void __init gic_init_bases(unsigned int gic_nr, int irq_start,
 		     "GIC_NON_BANKED not enabled, ignoring %08x offset!",
 		     percpu_offset);
 		gic->dist_base.common_base = dist_base;
+		common_base_store = dist_base;
 		gic->cpu_base.common_base = cpu_base;
 		gic_set_base_accessor(gic, gic_get_common_base);
 	}

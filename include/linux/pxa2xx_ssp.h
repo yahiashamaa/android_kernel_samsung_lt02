@@ -80,7 +80,7 @@
 #define SSSR_RFS	(1 << 6)	/* Receive FIFO Service Request */
 #define SSSR_ROR	(1 << 7)	/* Receive FIFO Overrun */
 
-#ifdef CONFIG_ARCH_PXA
+#if defined(CONFIG_ARCH_PXA) || defined(CONFIG_ARCH_MMP)
 #define RX_THRESH_DFLT	8
 #define TX_THRESH_DFLT	8
 
@@ -160,8 +160,12 @@ enum pxa_ssp_type {
 	PXA25x_SSP,  /* pxa 210, 250, 255, 26x */
 	PXA25x_NSSP, /* pxa 255, 26x (including ASSP) */
 	PXA27x_SSP,
+	PXA3xx_SSP,
 	PXA168_SSP,
+	PXA910_SSP,
+	PXA988_SSP,
 	CE4100_SSP,
+	MMP_SSP,
 };
 
 struct ssp_device {

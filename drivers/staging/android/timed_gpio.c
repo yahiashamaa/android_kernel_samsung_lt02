@@ -24,6 +24,13 @@
 #include "timed_output.h"
 #include "timed_gpio.h"
 
+#ifdef CONFIG_MACH_LT02
+#include <mach/mfp-pxa986-lt02.h>
+#include <mach/pxa988.h>
+#elif defined(CONFIG_MACH_COCOA7)
+#include <mach/mfp-pxa986-cocoa7.h>
+#include <mach/pxa988.h>
+#endif
 
 struct timed_gpio_data {
 	struct timed_output_dev dev;
@@ -163,11 +170,21 @@ static struct platform_driver timed_gpio_driver = {
 
 static int __init timed_gpio_init(void)
 {
+#ifdef CONFIG_MACH_LT02
+	if (system_rev >= LT02_R0_1)
+		return 0;
+	else
+#endif
 	return platform_driver_register(&timed_gpio_driver);
 }
 
 static void __exit timed_gpio_exit(void)
 {
+#ifdef CONFIG_MACH_LT02
+	if (system_rev >= LT02_R0_1)
+		return;
+	else
+#endif
 	platform_driver_unregister(&timed_gpio_driver);
 }
 

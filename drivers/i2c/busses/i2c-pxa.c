@@ -38,8 +38,19 @@
 #include <linux/slab.h>
 #include <linux/io.h>
 #include <linux/i2c/pxa-i2c.h>
+#include <plat/pm.h>
 
 #include <asm/irq.h>
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+#include <mach/samsung_camera_lt02.h>
+#else
+#ifdef CONFIG_SOC_CAMERA_S5K4ECGX
+#include <mach/samsung_camera.h>
+#elif defined(CONFIG_SOC_CAMERA_SR030PC50)
+#include <mach/camera-sr030pc50.h>
+#endif
+#endif
+
 
 #ifndef CONFIG_HAVE_CLK
 #define clk_get(dev, id)	NULL
@@ -54,12 +65,15 @@ struct pxa_reg_layout {
 	u32 icr;
 	u32 isr;
 	u32 isar;
+	u32 ilcr;
+	u32 iwcr;
 };
 
 enum pxa_i2c_types {
 	REGS_PXA2XX,
 	REGS_PXA3XX,
 	REGS_CE4100,
+	REGS_PXA910,
 };
 
 /*
@@ -87,12 +101,22 @@ static struct pxa_reg_layout pxa_reg_layout[] = {
 		.isr =	0x04,
 		/* no isar register */
 	},
+	[REGS_PXA910] = {
+		.ibmr = 0x00,
+		.idbr = 0x08,
+		.icr =	0x10,
+		.isr =	0x18,
+		.isar = 0x20,
+		.ilcr = 0x28,
+		.iwcr = 0x30,
+	},
 };
 
 static const struct platform_device_id i2c_pxa_id_table[] = {
 	{ "pxa2xx-i2c",		REGS_PXA2XX },
 	{ "pxa3xx-pwri2c",	REGS_PXA3XX },
 	{ "ce4100-i2c",		REGS_CE4100 },
+	{ "pxa910-i2c",		REGS_PXA910 },
 	{ },
 };
 MODULE_DEVICE_TABLE(platform, i2c_pxa_id_table);
@@ -117,6 +141,8 @@ MODULE_DEVICE_TABLE(platform, i2c_pxa_id_table);
 #define ICR_SADIE	(1 << 13)	   /* slave address detected int enable */
 #define ICR_UR		(1 << 14)	   /* unit reset */
 #define ICR_FM		(1 << 15)	   /* fast mode */
+#define ICR_HS		(1 << 16)	   /* High Speed mode */
+#define ICR_GPIOEN	(1 << 19)	   /* enable GPIO mode for SCL in HS */
 
 #define ISR_RWM		(1 << 0)	   /* read/write mode */
 #define ISR_ACKNAK	(1 << 1)	   /* ack/nak status */
@@ -138,6 +164,7 @@ struct pxa_i2c {
 	unsigned int		msg_idx;
 	unsigned int		msg_ptr;
 	unsigned int		slave_addr;
+	unsigned int		req_slave_addr;
 
 	struct i2c_adapter	adap;
 	struct clk		*clk;
@@ -155,6 +182,8 @@ struct pxa_i2c {
 	void __iomem		*reg_icr;
 	void __iomem		*reg_isr;
 	void __iomem		*reg_isar;
+	void __iomem		*reg_ilcr;
+	void __iomem		*reg_iwcr;
 
 	unsigned long		iobase;
 	unsigned long		iosize;
@@ -162,6 +191,12 @@ struct pxa_i2c {
 	int			irq;
 	unsigned int		use_pio :1;
 	unsigned int		fast_mode :1;
+	unsigned int		high_mode:1;
+	bool			highmode_enter;
+	unsigned char		master_code;
+	unsigned int		ilcr;
+	unsigned int		iwcr;
+	struct pm_qos_request	qos_idle;
 };
 
 #define _IBMR(i2c)	((i2c)->reg_ibmr)
@@ -169,11 +204,16 @@ struct pxa_i2c {
 #define _ICR(i2c)	((i2c)->reg_icr)
 #define _ISR(i2c)	((i2c)->reg_isr)
 #define _ISAR(i2c)	((i2c)->reg_isar)
+#define _ILCR(i2c)	((i2c)->reg_ilcr)
+#define _IWCR(i2c)	((i2c)->reg_iwcr)
 
 /*
  * I2C Slave mode address
  */
 #define I2C_PXA_SLAVE_ADDR      0x1
+
+#define DEBUG 0
+static void i2c_pxa_reset(struct pxa_i2c *i2c);
 
 #ifdef DEBUG
 
@@ -255,15 +295,26 @@ static void i2c_pxa_show_state(struct pxa_i2c *i2c, int lno, const char *fname)
 static void i2c_pxa_scream_blue_murder(struct pxa_i2c *i2c, const char *why)
 {
 	unsigned int i;
-	printk(KERN_ERR "i2c: error: %s\n", why);
+	struct i2c_pxa_platform_data *plat =
+		(i2c->adap.dev.parent)->platform_data;
+
+	printk(KERN_ERR"i2c: <%s> slave_0x%x error: %s\n", i2c->adap.name,
+		i2c->req_slave_addr >> 1, why);
 	printk(KERN_ERR "i2c: msg_num: %d msg_idx: %d msg_ptr: %d\n",
 		i2c->msg_num, i2c->msg_idx, i2c->msg_ptr);
-	printk(KERN_ERR "i2c: ICR: %08x ISR: %08x\n",
-	       readl(_ICR(i2c)), readl(_ISR(i2c)));
+	printk(KERN_ERR "i2c: IBMR: %08x IDBR: %08x ICR: %08x ISR: %08x\n",
+		readl(_IBMR(i2c)), readl(_IDBR(i2c)), readl(_ICR(i2c)),
+		readl(_ISR(i2c)));
 	printk(KERN_DEBUG "i2c: log: ");
 	for (i = 0; i < i2c->irqlogidx; i++)
 		printk("[%08x:%08x] ", i2c->isrlog[i], i2c->icrlog[i]);
 	printk("\n");
+	if (strcmp(why, "exhausted retries") != 0) {
+		if (plat && plat->i2c_bus_reset)
+			plat->i2c_bus_reset(i2c->adap.nr);
+		/* reset i2c contorler when it's fail */
+		i2c_pxa_reset(i2c);
+	}
 }
 
 #else /* ifdef DEBUG */
@@ -315,6 +366,11 @@ static void i2c_pxa_abort(struct pxa_i2c *i2c)
 static int i2c_pxa_wait_bus_not_busy(struct pxa_i2c *i2c)
 {
 	int timeout = DEF_TIMEOUT;
+
+	if (readl(_ISR(i2c)) & (ISR_IBB | ISR_UB)) {
+		i2c_pxa_reset(i2c);
+		timeout /= 2;
+	}
 
 	while (timeout-- && readl(_ISR(i2c)) & (ISR_IBB | ISR_UB)) {
 		if ((readl(_ISR(i2c)) & ISR_SAD) != 0)
@@ -446,7 +502,11 @@ static void i2c_pxa_set_slave(struct pxa_i2c *i2c, int errcode)
 	}
 }
 #else
-#define i2c_pxa_set_slave(i2c, err)	do { } while (0)
+static void i2c_pxa_set_slave(struct pxa_i2c *i2c, int errcode)
+{
+	writel(readl(_ICR(i2c)) & ~ICR_IUE, _ICR(i2c));
+	return;
+}
 #endif
 
 static void i2c_pxa_reset(struct pxa_i2c *i2c)
@@ -461,11 +521,25 @@ static void i2c_pxa_reset(struct pxa_i2c *i2c)
 	writel(I2C_ISR_INIT, _ISR(i2c));
 	writel(readl(_ICR(i2c)) & ~ICR_UR, _ICR(i2c));
 
+#ifdef CONFIG_I2C_PXA_SLAVE
 	if (i2c->reg_isar)
 		writel(i2c->slave_addr, _ISAR(i2c));
+#endif
 
 	/* set control register values */
 	writel(I2C_ICR_INIT | (i2c->fast_mode ? ICR_FM : 0), _ICR(i2c));
+	writel(readl(_ICR(i2c)) | (i2c->high_mode ? ICR_HS : 0), _ICR(i2c));
+
+	/* There are 2 multi-masters on the I2C bus - APPS and COMM
+	 * It is important both uses the standard frequency
+	 * Adjust clock by ILCR, IWCR is important
+	 */
+	if (i2c->ilcr)
+		writel(i2c->ilcr, _ILCR(i2c));
+	if (i2c->iwcr)
+		writel(i2c->iwcr, _IWCR(i2c));
+	udelay(2);
+
 
 #ifdef CONFIG_I2C_PXA_SLAVE
 	dev_info(&i2c->adap.dev, "Enabling slave mode\n");
@@ -621,6 +695,38 @@ static void i2c_pxa_slave_stop(struct pxa_i2c *i2c)
  * PXA I2C Master mode
  */
 
+static int i2c_pxa_send_mastercode(struct pxa_i2c *i2c)
+{
+	u32 icr;
+	long timeout;
+
+	spin_lock_irq(&i2c->lock);
+
+	i2c->highmode_enter = true;
+
+	icr = readl(_ICR(i2c));
+	icr |= ICR_HS;  /* bit_15 clear or set already done by reset */
+
+	icr |= ICR_GPIOEN;
+	writel(i2c->master_code, _IDBR(i2c));
+
+	icr |= ICR_START | ICR_TB | ICR_ITEIE;
+	icr &= ~ICR_STOP;
+	icr &= ~ICR_ALDIE;
+	writel(icr, _ICR(i2c));
+
+	spin_unlock_irq(&i2c->lock);
+
+	timeout = wait_event_timeout(i2c->wait, \
+		i2c->highmode_enter == false, HZ * 1);
+	i2c->highmode_enter = false;
+
+	if (!timeout)
+		return 1;
+	else
+		return 0;
+}
+
 static inline unsigned int i2c_pxa_addr_byte(struct i2c_msg *msg)
 {
 	unsigned int addr = (msg->addr & 0x7f) << 1;
@@ -639,6 +745,7 @@ static inline void i2c_pxa_start_message(struct pxa_i2c *i2c)
 	 * Step 1: target slave address into IDBR
 	 */
 	writel(i2c_pxa_addr_byte(i2c->msg), _IDBR(i2c));
+	i2c->req_slave_addr = i2c_pxa_addr_byte(i2c->msg);
 
 	/*
 	 * Step 2: initiate the write.
@@ -690,7 +797,7 @@ static int i2c_pxa_pio_set_master(struct pxa_i2c *i2c)
 static int i2c_pxa_do_pio_xfer(struct pxa_i2c *i2c,
 			       struct i2c_msg *msg, int num)
 {
-	unsigned long timeout = 500000; /* 5 seconds */
+	unsigned long timeout = 100000; /* 1 seconds */
 	int ret = 0;
 
 	ret = i2c_pxa_pio_set_master(i2c);
@@ -703,6 +810,8 @@ static int i2c_pxa_do_pio_xfer(struct pxa_i2c *i2c,
 	i2c->msg_ptr = 0;
 	i2c->irqlogidx = 0;
 
+	pm_qos_update_request(&i2c->qos_idle, PM_QOS_CPUIDLE_BLOCK_DDR_VALUE);
+
 	i2c_pxa_start_message(i2c);
 
 	while (i2c->msg_num > 0 && --timeout) {
@@ -712,6 +821,8 @@ static int i2c_pxa_do_pio_xfer(struct pxa_i2c *i2c,
 
 	i2c_pxa_stop_message(i2c);
 
+	pm_qos_update_request(&i2c->qos_idle,
+			PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE);
 	/*
 	 * We place the return code in i2c->msg_idx.
 	 */
@@ -720,6 +831,9 @@ static int i2c_pxa_do_pio_xfer(struct pxa_i2c *i2c,
 out:
 	if (timeout == 0)
 		i2c_pxa_scream_blue_murder(i2c, "timeout");
+
+	if (ret < 0)
+		i2c_pxa_reset(i2c);
 
 	return ret;
 }
@@ -750,6 +864,16 @@ static int i2c_pxa_do_xfer(struct pxa_i2c *i2c, struct i2c_msg *msg, int num)
 		goto out;
 	}
 
+	if (i2c->high_mode) {
+		ret = i2c_pxa_send_mastercode(i2c);
+		if (ret) {
+			dev_err(&i2c->adap.dev, "i2c_pxa_send_mastercode timeout\n");
+			writel(readl(_ICR(i2c)) & ~(ICR_START | ICR_GPIOEN),
+				_ICR(i2c));
+			goto out;
+		}
+	}
+
 	spin_lock_irq(&i2c->lock);
 
 	i2c->msg = msg;
@@ -758,6 +882,8 @@ static int i2c_pxa_do_xfer(struct pxa_i2c *i2c, struct i2c_msg *msg, int num)
 	i2c->msg_ptr = 0;
 	i2c->irqlogidx = 0;
 
+	pm_qos_update_request(&i2c->qos_idle, PM_QOS_CPUIDLE_BLOCK_DDR_VALUE);
+
 	i2c_pxa_start_message(i2c);
 
 	spin_unlock_irq(&i2c->lock);
@@ -765,8 +891,11 @@ static int i2c_pxa_do_xfer(struct pxa_i2c *i2c, struct i2c_msg *msg, int num)
 	/*
 	 * The rest of the processing occurs in the interrupt handler.
 	 */
-	timeout = wait_event_timeout(i2c->wait, i2c->msg_num == 0, HZ * 5);
+	timeout = wait_event_timeout(i2c->wait, i2c->msg_num == 0, HZ * 1);
 	i2c_pxa_stop_message(i2c);
+
+	pm_qos_update_request(&i2c->qos_idle,
+			PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE);
 
 	/*
 	 * We place the return code in i2c->msg_idx.
@@ -779,6 +908,9 @@ static int i2c_pxa_do_xfer(struct pxa_i2c *i2c, struct i2c_msg *msg, int num)
 	}
 
  out:
+	if (ret < 0)
+		i2c_pxa_reset(i2c);
+
 	return ret;
 }
 
@@ -787,7 +919,10 @@ static int i2c_pxa_pio_xfer(struct i2c_adapter *adap,
 {
 	struct pxa_i2c *i2c = adap->algo_data;
 	int ret, i;
-
+	pr_info("--> %s is called to r/w i2c reg\n", __func__);
+#ifndef CONFIG_I2C_PXA_SLAVE
+	writel(readl(_ICR(i2c)) | ICR_IUE, _ICR(i2c));
+#endif
 	/* If the I2C controller is disabled we need to reset it
 	  (probably due to a suspend/resume destroying state). We do
 	  this here as we can then avoid worrying about resuming the
@@ -910,6 +1045,7 @@ static void i2c_pxa_irq_txempty(struct pxa_i2c *i2c, u32 isr)
 		 * Write the next address.
 		 */
 		writel(i2c_pxa_addr_byte(i2c->msg), _IDBR(i2c));
+		i2c->req_slave_addr = i2c_pxa_addr_byte(i2c->msg);
 
 		/*
 		 * And trigger a repeated start, and send the byte.
@@ -997,11 +1133,14 @@ static irqreturn_t i2c_pxa_handler(int this_irq, void *dev_id)
 			i2c_pxa_slave_txempty(i2c, isr);
 		if (isr & ISR_IRF)
 			i2c_pxa_slave_rxfull(i2c, isr);
-	} else if (i2c->msg) {
+	} else if (i2c->msg && (!i2c->highmode_enter)) {
 		if (isr & ISR_ITE)
 			i2c_pxa_irq_txempty(i2c, isr);
 		if (isr & ISR_IRF)
 			i2c_pxa_irq_rxfull(i2c, isr);
+	} else if ((isr & ISR_ITE) && i2c->highmode_enter) {
+		i2c->highmode_enter = false;
+		wake_up(&i2c->wait);
 	} else {
 		i2c_pxa_scream_blue_murder(i2c, "spurious irq");
 	}
@@ -1014,7 +1153,10 @@ static int i2c_pxa_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num
 {
 	struct pxa_i2c *i2c = adap->algo_data;
 	int ret, i;
-
+#ifndef CONFIG_I2C_PXA_SLAVE
+	writel(readl(_ICR(i2c)) | ICR_IUE, _ICR(i2c));
+#endif
+	enable_irq(i2c->irq);
 	for (i = adap->retries; i >= 0; i--) {
 		ret = i2c_pxa_do_xfer(i2c, msgs, num);
 		if (ret != I2C_RETRY)
@@ -1028,6 +1170,7 @@ static int i2c_pxa_xfer(struct i2c_adapter *adap, struct i2c_msg msgs[], int num
 	ret = -EREMOTEIO;
  out:
 	i2c_pxa_set_slave(i2c, ret);
+	disable_irq(i2c->irq);
 	return ret;
 }
 
@@ -1101,6 +1244,8 @@ static int i2c_pxa_probe(struct platform_device *dev)
 	struct resource *res = NULL;
 	int ret, irq;
 
+	int pm_qos_class = PM_QOS_CPUIDLE_BLOCK;
+
 	i2c = kzalloc(sizeof(struct pxa_i2c), GFP_KERNEL);
 	if (!i2c) {
 		ret = -ENOMEM;
@@ -1111,22 +1256,26 @@ static int i2c_pxa_probe(struct platform_device *dev)
 	if (ret > 0)
 		ret = i2c_pxa_probe_pdata(dev, i2c, &i2c_type);
 	if (ret < 0)
-		goto eclk;
+		goto eres;
 
 	res = platform_get_resource(dev, IORESOURCE_MEM, 0);
 	irq = platform_get_irq(dev, 0);
 	if (res == NULL || irq < 0) {
 		ret = -ENODEV;
-		goto eclk;
+		goto eres;
 	}
 
 	if (!request_mem_region(res->start, resource_size(res), res->name)) {
 		ret = -ENOMEM;
-		goto eclk;
+		goto eres;
 	}
 
 	i2c->adap.owner   = THIS_MODULE;
-	i2c->adap.retries = 5;
+	i2c->adap.retries = 3;
+
+	i2c->qos_idle.name = i2c->adap.name;
+	pm_qos_add_request(&i2c->qos_idle, pm_qos_class,
+			PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE);
 
 	spin_lock_init(&i2c->lock);
 	init_waitqueue_head(&i2c->wait);
@@ -1158,6 +1307,8 @@ static int i2c_pxa_probe(struct platform_device *dev)
 	i2c->reg_isr = i2c->reg_base + pxa_reg_layout[i2c_type].isr;
 	if (i2c_type != REGS_CE4100)
 		i2c->reg_isar = i2c->reg_base + pxa_reg_layout[i2c_type].isar;
+	i2c->reg_ilcr = i2c->reg_base + pxa_reg_layout[i2c_type].ilcr;
+	i2c->reg_iwcr = i2c->reg_base + pxa_reg_layout[i2c_type].iwcr;
 
 	i2c->iobase = res->start;
 	i2c->iosize = resource_size(res);
@@ -1165,6 +1316,7 @@ static int i2c_pxa_probe(struct platform_device *dev)
 	i2c->irq = irq;
 
 	i2c->slave_addr = I2C_PXA_SLAVE_ADDR;
+	i2c->highmode_enter = false;
 
 	if (plat) {
 #ifdef CONFIG_I2C_PXA_SLAVE
@@ -1172,6 +1324,20 @@ static int i2c_pxa_probe(struct platform_device *dev)
 		i2c->slave = plat->slave;
 #endif
 		i2c->adap.class = plat->class;
+		i2c->adap.hardware_lock = plat->hardware_lock;
+		i2c->adap.hardware_unlock = plat->hardware_unlock;
+		i2c->adap.hardware_trylock = plat->hardware_trylock;
+		i2c->high_mode = plat->high_mode;
+		i2c->master_code = plat->master_code;
+		i2c->ilcr = plat->ilcr;
+		i2c->iwcr = plat->iwcr;
+	}
+
+	if (i2c->high_mode) {
+		clk_set_rate(i2c->clk, 62400000);
+		printk(KERN_INFO "i2c: <%s> set rate to %ld\n", \
+			i2c->adap.name, clk_get_rate(i2c->clk));
+
 	}
 
 	clk_enable(i2c->clk);
@@ -1180,13 +1346,30 @@ static int i2c_pxa_probe(struct platform_device *dev)
 		i2c->adap.algo = &i2c_pxa_pio_algorithm;
 	} else {
 		i2c->adap.algo = &i2c_pxa_algorithm;
-		ret = request_irq(irq, i2c_pxa_handler, IRQF_SHARED,
-				  i2c->adap.name, i2c);
+		ret = request_irq(irq, i2c_pxa_handler,
+				IRQF_SHARED | IRQF_NO_SUSPEND,
+				i2c->adap.name, i2c);
 		if (ret)
 			goto ereqirq;
 	}
 
 	i2c_pxa_reset(i2c);
+	/* For samsung aruba, camera maybe pull down all i2c pins which leads to wrong state of AP side*/
+	if (i2c->adap.nr == 0x0) {
+		#ifdef CONFIG_SOC_CAMERA_S5K4ECGX
+		s5k_cam_mclk_en.i2c_pxa_reset = i2c_pxa_reset;
+		s5k_cam_mclk_en.i2c = i2c;
+		#elif defined(CONFIG_SOC_CAMERA_SR030PC50)
+		sr030_cam_mclk_en.i2c_pxa_reset = i2c_pxa_reset;
+		sr030_cam_mclk_en.i2c = i2c;
+		#elif defined(CONFIG_SOC_CAMERA_SR352) || defined(CONFIG_SOC_CAMERA_SR130PC10) // LT02
+		s5k_cam_mclk_en.i2c_pxa_reset = i2c_pxa_reset;
+		s5k_cam_mclk_en.i2c = i2c;
+		#endif
+		/*lyh:  TODO maybe don't need */
+	}
+
+	disable_irq(i2c->irq);
 
 	i2c->adap.algo_data = i2c;
 	i2c->adap.dev.parent = &dev->dev;
@@ -1221,9 +1404,11 @@ ereqirq:
 eremap:
 	clk_put(i2c->clk);
 eclk:
+	pm_qos_remove_request(&i2c->qos_idle);
+	release_mem_region(res->start, resource_size(res));
+eres:
 	kfree(i2c);
 emalloc:
-	release_mem_region(res->start, resource_size(res));
 	return ret;
 }
 
@@ -1232,6 +1417,7 @@ static int __exit i2c_pxa_remove(struct platform_device *dev)
 	struct pxa_i2c *i2c = platform_get_drvdata(dev);
 
 	platform_set_drvdata(dev, NULL);
+	pm_qos_remove_request(&i2c->qos_idle);
 
 	i2c_del_adapter(&i2c->adap);
 	if (!i2c->use_pio)
@@ -1247,45 +1433,12 @@ static int __exit i2c_pxa_remove(struct platform_device *dev)
 	return 0;
 }
 
-#ifdef CONFIG_PM
-static int i2c_pxa_suspend_noirq(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct pxa_i2c *i2c = platform_get_drvdata(pdev);
-
-	clk_disable(i2c->clk);
-
-	return 0;
-}
-
-static int i2c_pxa_resume_noirq(struct device *dev)
-{
-	struct platform_device *pdev = to_platform_device(dev);
-	struct pxa_i2c *i2c = platform_get_drvdata(pdev);
-
-	clk_enable(i2c->clk);
-	i2c_pxa_reset(i2c);
-
-	return 0;
-}
-
-static const struct dev_pm_ops i2c_pxa_dev_pm_ops = {
-	.suspend_noirq = i2c_pxa_suspend_noirq,
-	.resume_noirq = i2c_pxa_resume_noirq,
-};
-
-#define I2C_PXA_DEV_PM_OPS (&i2c_pxa_dev_pm_ops)
-#else
-#define I2C_PXA_DEV_PM_OPS NULL
-#endif
-
 static struct platform_driver i2c_pxa_driver = {
 	.probe		= i2c_pxa_probe,
 	.remove		= __exit_p(i2c_pxa_remove),
 	.driver		= {
 		.name	= "pxa2xx-i2c",
 		.owner	= THIS_MODULE,
-		.pm	= I2C_PXA_DEV_PM_OPS,
 		.of_match_table = i2c_pxa_dt_ids,
 	},
 	.id_table	= i2c_pxa_id_table,

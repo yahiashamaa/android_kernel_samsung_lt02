@@ -16,10 +16,14 @@ struct dev_archdata {
 };
 
 struct omap_device;
+struct mmp_device;
 
 struct pdev_archdata {
 #ifdef CONFIG_ARCH_OMAP
 	struct omap_device *od;
+#endif
+#ifdef CONFIG_ARCH_MMP
+	struct mmp_device *md;
 #endif
 };
 

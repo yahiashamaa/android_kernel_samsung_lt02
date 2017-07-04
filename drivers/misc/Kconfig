@@ -40,6 +40,24 @@ config AD525X_DPOT_I2C
 	  To compile this driver as a module, choose M here: the
 	  module will be called ad525x_dpot-i2c.
 
+config NFC_PN544
+        bool "NXP PN544 NFC Controller Driver"
+        default n
+        help
+          NXP PN544 Near Field Communication controller support.
+          This option enables device driver support for the NFC.
+          It is used by many services. NFC is fully controlled using I2C
+          to communicate the AP chip.
+
+config NFC_PN547
+        bool "NXP PN547 NFC Controller Driver"
+        default n
+        help
+          NXP PN547 Near Field Communication controller support.
+          This option enables device driver support for the NFC.
+          It is used by many services. NFC is fully controlled using I2C
+          to communicate the AP chip.
+
 config AD525X_DPOT_SPI
 	tristate "support SPI bus connection"
 	depends on AD525X_DPOT && SPI_MASTER
@@ -382,6 +400,14 @@ config HMC6352
 	  This driver provides support for the Honeywell HMC6352 compass,
 	  providing configuration and heading data via sysfs.
 
+config SENSORS_AK8975
+	tristate "AK8975 compass support"
+	default n
+	depends on I2C
+	help
+	  If you say yes here you get support for Asahi Kasei's
+	  orientation sensor AK8975.
+
 config EP93XX_PWM
 	tristate "EP93xx PWM support"
 	depends on ARCH_EP93XX
@@ -424,6 +450,10 @@ config TI_DAC7512
 
 	  This driver can also be built as a module. If so, the module
 	  will be called ti_dac7512.
+
+config UID_STAT
+	bool "UID based statistics tracking exported to /proc/uid_stat"
+	default n
 
 config VMWARE_BALLOON
 	tristate "VMware Balloon Driver"
@@ -498,6 +528,61 @@ config MAX8997_MUIC
 	  Maxim MAX8997 PMIC.
 	  The MAX8997 MUIC is a USB port accessory detector and switch.
 
+config WL127X_RFKILL
+	tristate "Bluetooth power control driver for TI wl127x"
+	depends on RFKILL
+	default n
+	---help---
+	 Creates an rfkill entry in sysfs for power control of Bluetooth
+	 TI wl127x chips.
+
+config SD8XXX_RFKILL
+        tristate "Rfkill power control for Marvell sd8xxx wlan/bt/fm"
+        depends on MMC_SDHCI_PXAV2 || MMC_SDHCI_PXAV3
+        select RFKILL
+        select WIRELESS_EXT
+        select WEXT_PRIV
+        select WEXT_SPY
+        default n
+        ---help---
+         Creates an rfkill entry in sysfs for power control of Marvell
+         sd8xxx wlan/bt/fm chips.
+
+config TC35876X
+	boolean "TC35876X chip"
+	depends on I2C && I2C_PXA
+	default n
+	help
+	  If you say yes here, you support for it.
+
+	  This driver can NOT be built as a module.
+
+config SENSORS_K3DH
+         tristate "K3DH acceleration sensor support"
+         depends on I2C
+         default n
+         help
+           Driver for STMicroelectronic K3DH accelerometer.
+ 
+config SENSORS_ACC_12BIT
+         tristate "12bit acceleration sensor support"
+         depends on I2C
+         default n
+         help
+           Driver for 12bit accelerometer.
+
+config SENSORS_GP2AP002
+         tristate "gp2a proximity_sensor"
+         default n
+         help
+           This option enables magnetic sensors using gp2ap002 proximity driver.
+
+config SENSORS_PAS221
+         tristate "pas221 proximity_sensor"
+         default n
+         help
+           This option enables magnetic sensors using pas221 proximity driver.
+
 source "drivers/misc/c2port/Kconfig"
 source "drivers/misc/eeprom/Kconfig"
 source "drivers/misc/cb710/Kconfig"
@@ -506,4 +591,5 @@ source "drivers/misc/ti-st/Kconfig"
 source "drivers/misc/lis3lv02d/Kconfig"
 source "drivers/misc/carma/Kconfig"
 source "drivers/misc/altera-stapl/Kconfig"
+source "drivers/misc/inv_mpu/Kconfig"
 endmenu

@@ -13,6 +13,8 @@
 #ifndef __LINUX_POWER_SUPPLY_H__
 #define __LINUX_POWER_SUPPLY_H__
 
+#include <linux/device.h>
+#include <linux/wakelock.h>
 #include <linux/workqueue.h>
 #include <linux/leds.h>
 
@@ -44,6 +46,7 @@ enum {
 	POWER_SUPPLY_CHARGE_TYPE_NONE,
 	POWER_SUPPLY_CHARGE_TYPE_TRICKLE,
 	POWER_SUPPLY_CHARGE_TYPE_FAST,
+	POWER_SUPPLY_CHARGE_TYPE_SLOW,
 };
 
 enum {
@@ -54,6 +57,7 @@ enum {
 	POWER_SUPPLY_HEALTH_OVERVOLTAGE,
 	POWER_SUPPLY_HEALTH_UNSPEC_FAILURE,
 	POWER_SUPPLY_HEALTH_COLD,
+	POWER_SUPPLY_HEALTH_UNDERVOLTAGE,
 };
 
 enum {
@@ -79,6 +83,12 @@ enum {
 	POWER_SUPPLY_SCOPE_UNKNOWN = 0,
 	POWER_SUPPLY_SCOPE_SYSTEM,
 	POWER_SUPPLY_SCOPE_DEVICE,
+};
+
+/* for SAMSUNG OTG */
+enum {
+	POWER_SUPPLY_CAPACITY_OTG_ENABLE = 0,
+	POWER_SUPPLY_CAPACITY_OTG_DISABLE,
 };
 
 enum power_supply_property {
@@ -117,13 +127,34 @@ enum power_supply_property {
 	POWER_SUPPLY_PROP_CAPACITY, /* in percents! */
 	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
 	POWER_SUPPLY_PROP_TEMP,
+#if defined(CONFIG_SPA) //book
+	POWER_SUPPLY_PROP_TEMP_ADC,
+#endif
 	POWER_SUPPLY_PROP_TEMP_AMBIENT,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
 	POWER_SUPPLY_PROP_TIME_TO_FULL_AVG,
 	POWER_SUPPLY_PROP_TYPE, /* use power_supply.type instead */
+#if defined(CONFIG_SPA) //book
+	/* *#0228# */
+	POWER_SUPPLY_PROP_BATT_VOL,
+	POWER_SUPPLY_PROP_BATT_VOL_AVER,
+	POWER_SUPPLY_PROP_BATT_TEMP,
+	POWER_SUPPLY_PROP_BATT_TEMP_ADC,
+	POWER_SUPPLY_PROP_BATT_TEMP_AVER,
+	POWER_SUPPLY_PROP_BATT_TEMP_ADC_AVER,
+	POWER_SUPPLY_PROP_BATT_CHARGING_SOURCE,
+	/* *#0228# */
+	/* DFT */
+	POWER_SUPPLY_PROP_BATT_READ_RAW_SOC,
+	/* DFT */
+#endif
 	POWER_SUPPLY_PROP_SCOPE,
+	/* Local extensions */
+	POWER_SUPPLY_PROP_USB_HC,
+	POWER_SUPPLY_PROP_USB_OTG,
+	POWER_SUPPLY_PROP_CHARGE_ENABLED,
 	/* Properties of type `const char *' */
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
@@ -139,7 +170,47 @@ enum power_supply_type {
 	POWER_SUPPLY_TYPE_USB_DCP,	/* Dedicated Charging Port */
 	POWER_SUPPLY_TYPE_USB_CDP,	/* Charging Downstream Port */
 	POWER_SUPPLY_TYPE_USB_ACA,	/* Accessory Charger Adapters */
+	POWER_SUPPLY_TYPE_MISC,
+	POWER_SUPPLY_TYPE_CARDOCK,
+	POWER_SUPPLY_TYPE_WPC,		/* Wireless Charging should be 10 */
+	POWER_SUPPLY_TYPE_UARTOFF,
+	POWER_SUPPLY_TYPE_OTG,
 };
+
+/*
+ * EXTENDED_ONLINE_TYPE
+ * - support various charger cable type
+ * - set type from each accessory driver(muic, host, mhl, etc,,,)
+ *
+ * - type format
+ * | 31-24: RSVD | 23-16: MAIN TYPE | 15-8: SUB TYPE | 7-0: POWER TYPE |
+ */
+#define ONLINE_TYPE_RSVD_SHIFT	24
+#define ONLINE_TYPE_RSVD_MASK	(0xF << ONLINE_TYPE_RSVD_SHIFT)
+#define ONLINE_TYPE_MAIN_SHIFT	16
+#define ONLINE_TYPE_MAIN_MASK	(0xF << ONLINE_TYPE_MAIN_SHIFT)
+#define ONLINE_TYPE_SUB_SHIFT	8
+#define ONLINE_TYPE_SUB_MASK	(0xF << ONLINE_TYPE_SUB_SHIFT)
+#define ONLINE_TYPE_PWR_SHIFT	0
+#define ONLINE_TYPE_PWR_MASK	(0xF << ONLINE_TYPE_PWR_SHIFT)
+
+enum online_sub_type {
+	ONLINE_SUB_TYPE_UNKNOWN	= 0,
+	ONLINE_SUB_TYPE_MHL,
+	ONLINE_SUB_TYPE_AUDIO,
+	ONLINE_SUB_TYPE_DESK,
+	ONLINE_SUB_TYPE_SMART_NOTG,
+	ONLINE_SUB_TYPE_SMART_OTG,
+	ONLINE_SUB_TYPE_KBD,
+};
+
+enum online_power_type {
+	ONLINE_POWER_TYPE_UNKNOWN = 0,
+	ONLINE_POWER_TYPE_BATTERY,
+	ONLINE_POWER_TYPE_TA,
+	ONLINE_POWER_TYPE_USB,
+};
+/* EXTENDED_ONLINE_TYPE */
 
 union power_supply_propval {
 	int intval;
@@ -172,6 +243,9 @@ struct power_supply {
 	/* private */
 	struct device *dev;
 	struct work_struct changed_work;
+	spinlock_t changed_lock;
+	bool changed;
+	struct wake_lock work_wake_lock;
 
 #ifdef CONFIG_LEDS_TRIGGERS
 	struct led_trigger *charging_full_trig;
@@ -210,6 +284,9 @@ extern struct power_supply *power_supply_get_by_name(char *name);
 extern void power_supply_changed(struct power_supply *psy);
 extern int power_supply_am_i_supplied(struct power_supply *psy);
 extern int power_supply_set_battery_charged(struct power_supply *psy);
+extern int power_supply_set_current_limit(struct power_supply *psy, int limit);
+extern int power_supply_set_online(struct power_supply *psy, bool enable);
+extern int power_supply_set_charge_type(struct power_supply *psy, int type);
 
 #if defined(CONFIG_POWER_SUPPLY) || defined(CONFIG_POWER_SUPPLY_MODULE)
 extern int power_supply_is_system_supplied(void);

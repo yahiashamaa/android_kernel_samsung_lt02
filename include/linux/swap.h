@@ -204,8 +204,6 @@ struct swap_list_t {
 	int next;	/* swapfile to be used next */
 };
 
-/* Swap 50% full? Release swapcache more aggressively.. */
-#define vm_swap_full() (nr_swap_pages*2 < total_swap_pages)
 
 /* linux/mm/page_alloc.c */
 extern unsigned long totalram_pages;
@@ -337,6 +335,16 @@ extern struct page *swapin_readahead(swp_entry_t, gfp_t,
 /* linux/mm/swapfile.c */
 extern long nr_swap_pages;
 extern long total_swap_pages;
+/* Swap 50% full? Release swapcache more aggressively.. */
+static inline bool vm_swap_full(void)
+{
+        return nr_swap_pages * 2 < total_swap_pages;
+}
+
+static inline long get_nr_swap_pages(void)
+{
+	return nr_swap_pages;
+}
 extern void si_swapinfo(struct sysinfo *);
 extern swp_entry_t get_swap_page(void);
 extern swp_entry_t get_swap_page_of_type(int);

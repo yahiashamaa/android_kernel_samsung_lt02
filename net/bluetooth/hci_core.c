@@ -1714,6 +1714,19 @@ int hci_le_scan(struct hci_dev *hdev, u8 type, u16 interval, u16 window,
 	return 0;
 }
 
+static void hci_conn_rs(struct hci_dev *hdev, struct hci_conn *c)
+{
+	hci_conn_switch_role(c, 0);
+}
+
+static void hci_conn_switch_to_master(unsigned long arg)
+{
+	struct hci_dev *hdev = (struct hci_dev *)arg;
+
+	if (hdev->conn_hash.acl_num > 1)
+		hci_conn_hash_walk_through(hdev, hci_conn_rs);
+}
+
 /* Register HCI device */
 int hci_register_dev(struct hci_dev *hdev)
 {
@@ -1739,6 +1752,8 @@ int hci_register_dev(struct hci_dev *hdev)
 		head = p; id++;
 	}
 
+	setup_timer(&hdev->rs_timer, hci_conn_switch_to_master,
+				(unsigned long)hdev);
 	sprintf(hdev->name, "hci%d", id);
 	hdev->id = id;
 	list_add_tail(&hdev->list, head);
@@ -1853,6 +1868,7 @@ void hci_unregister_dev(struct hci_dev *hdev)
 
 	BT_DBG("%p name %s bus %d", hdev, hdev->name, hdev->bus);
 
+	del_timer(&(hdev->rs_timer));
 	set_bit(HCI_UNREGISTER, &hdev->dev_flags);
 
 	write_lock(&hci_dev_list_lock);

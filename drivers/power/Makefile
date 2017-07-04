@@ -1,11 +1,15 @@
 ccflags-$(CONFIG_POWER_SUPPLY_DEBUG) := -DDEBUG
 
+#KSND for Using LT02_KidWifi(KOR) Dock
+ifeq ($(findstring lt02kidswifiww, $(TARGET_PRODUCT)), lt02kidswifiww)
+ccflags-y	+= -DUSE_LGT_DOCK
+endif
+
 power_supply-y				:= power_supply_core.o
 power_supply-$(CONFIG_SYSFS)		+= power_supply_sysfs.o
 power_supply-$(CONFIG_LEDS_TRIGGERS)	+= power_supply_leds.o
 
 obj-$(CONFIG_POWER_SUPPLY)	+= power_supply.o
-
 obj-$(CONFIG_PDA_POWER)		+= pda_power.o
 obj-$(CONFIG_APM_POWER)		+= apm_power.o
 obj-$(CONFIG_MAX8925_POWER)	+= max8925_power.o
@@ -44,3 +48,16 @@ obj-$(CONFIG_CHARGER_MANAGER)	+= charger-manager.o
 obj-$(CONFIG_CHARGER_MAX8997)	+= max8997_charger.o
 obj-$(CONFIG_CHARGER_MAX8998)	+= max8998_charger.o
 obj-$(CONFIG_CHARGER_SMB347)	+= smb347-charger.o
+obj-$(CONFIG_BATTERY_ANDROID)	+= android_battery.o
+obj-$(CONFIG_CHARGER_ISL9226)   += isl9226_charger.o
+obj-$(CONFIG_BATTERY_88PM80X)	+= 88pm80x_battery.o
+obj-$(CONFIG_SPA) += spa.o
+obj-$(CONFIG_FSA9480_MICROUSB) += fsa9480.o
+obj-$(CONFIG_SS6000_CHARGER)	+= ss6000_charger.o
+obj-$(CONFIG_BQ24157_CHARGER)	+= bq24157_charger.o
+obj-$(CONFIG_STC3115_FUELGAUGE) += stc3115_configsecure.o
+obj-$(CONFIG_FUELGAUGE_STC3115) += stc3115_configsecure.o
+obj-$(CONFIG_STC3115_FUELGAUGE) += stc3115_battery.o
+obj-$(CONFIG_MAX17043_FUELGAUGE) += max17043_fuelgauge.o
+obj-$(CONFIG_BQ27425_FUELGAUGE) += bq27425_fuelgauge.o
+

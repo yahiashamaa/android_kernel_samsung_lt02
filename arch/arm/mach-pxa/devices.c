@@ -19,6 +19,7 @@
 #include <mach/audio.h>
 #include <mach/hardware.h>
 #include <plat/pxa3xx_nand.h>
+#include <plat/pxa3xx_onenand.h>
 
 #include "devices.h"
 #include "generic.h"
@@ -338,6 +339,108 @@ struct platform_device pxa27x_device_i2c_power = {
 };
 #endif
 
+#ifdef CONFIG_PXA95x
+static u64 pxa95x_i2c_dma_mask = DMA_BIT_MASK(32);
+static struct resource pxa95x_resources_i2c0[] = {
+	{
+		.start	= 0x40301680,
+		.end	= 0x403016e3,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_I2C,
+		.end	= IRQ_I2C,
+		.flags	= IORESOURCE_IRQ,
+	}, {
+		/* DRCMR for RX */
+		.start	= 43,
+		.end	= 43,
+		.flags	= IORESOURCE_DMA,
+	}, {
+		/* DRCMR for TX */
+		.start	= 44,
+		.end	= 44,
+		.flags	= IORESOURCE_DMA,
+	},
+};
+
+struct platform_device pxa95x_device_i2c0 = {
+	.name		= "pxa2xx-i2c",
+	.id		= 0,
+	.dev		= {
+		.dma_mask = &pxa95x_i2c_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+	},
+	.resource	= pxa95x_resources_i2c0,
+	.num_resources	= ARRAY_SIZE(pxa95x_resources_i2c0),
+};
+
+static struct resource pxa95x_resources_i2c1[] = {
+	{
+		.start	= 0x40401680,
+		.end	= 0x404016e3,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_I2C1,
+		.end	= IRQ_I2C1,
+		.flags	= IORESOURCE_IRQ,
+	}, {
+		/* DRCMR for RX */
+		.start	= 41,
+		.end	= 41,
+		.flags	= IORESOURCE_DMA,
+	}, {
+		/* DRCMR for TX */
+		.start	= 42,
+		.end	= 42,
+		.flags	= IORESOURCE_DMA,
+	},
+};
+
+struct platform_device pxa95x_device_i2c1 = {
+	.name		= "pxa2xx-i2c",
+	.id		= 1,
+	.dev		= {
+		.dma_mask = &pxa95x_i2c_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+	},
+	.resource	= pxa95x_resources_i2c1,
+	.num_resources	= ARRAY_SIZE(pxa95x_resources_i2c1),
+};
+
+static struct resource pxa95x_resources_i2c2[] = {
+	{
+		.start	= 0x40801680,
+		.end	= 0x408016e3,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_I2C2,
+		.end	= IRQ_I2C2,
+		.flags	= IORESOURCE_IRQ,
+	}, {
+		/* DRCMR for RX */
+		.start	= 39,
+		.end	= 39,
+		.flags	= IORESOURCE_DMA,
+	}, {
+		/* DRCMR for TX */
+		.start	= 40,
+		.end	= 40,
+		.flags	= IORESOURCE_DMA,
+	},
+};
+
+struct platform_device pxa95x_device_i2c2 = {
+	.name		= "pxa2xx-i2c",
+	.id		= 2,
+	.dev		= {
+		.dma_mask = &pxa95x_i2c_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+	},
+	.resource	= pxa95x_resources_i2c2,
+	.num_resources	= ARRAY_SIZE(pxa95x_resources_i2c2),
+};
+#endif
+
 static struct resource pxai2s_resources[] = {
 	{
 		.start	= 0x40400000,
@@ -415,6 +518,11 @@ static struct resource pxa_rtc_resources[] = {
 		.end    = IRQ_RTCAlrm,
 		.name	= "rtc alarm",
 		.flags  = IORESOURCE_IRQ,
+	},
+	[3] = {
+		.start  = 0x40F500A0,
+		.end    = 0x40F500A0 + 0x04,
+		.flags  = IORESOURCE_MEM,
 	},
 };
 
@@ -1028,6 +1136,33 @@ struct platform_device pxa3xx_device_nand = {
 void __init pxa3xx_set_nand_info(struct pxa3xx_nand_platform_data *info)
 {
 	pxa_register_device(&pxa3xx_device_nand, info);
+}
+
+/* pxa3xx onenand resource */
+static u64 pxa3xx_onenand_dma_mask = DMA_BIT_MASK(32);
+
+static struct resource pxa3xx_resources_onenand[] = {
+	[0] = {
+		.start  = 0x10000000,
+		.end    = 0x100fffff,
+		.flags  = IORESOURCE_MEM,
+	},
+};
+
+struct platform_device pxa3xx_device_onenand = {
+	.name		= "pxa3xx-onenand",
+	.id		= -1,
+	.dev		=  {
+		.dma_mask	= &pxa3xx_onenand_dma_mask,
+		.coherent_dma_mask = DMA_BIT_MASK(32),
+	},
+	.resource	= pxa3xx_resources_onenand,
+	.num_resources	= ARRAY_SIZE(pxa3xx_resources_onenand),
+};
+
+void __init pxa3xx_set_onenand_info(struct pxa3xx_onenand_platform_data *info)
+{
+	pxa_register_device(&pxa3xx_device_onenand, info);
 }
 
 static u64 pxa3xx_ssp4_dma_mask = DMA_BIT_MASK(32);

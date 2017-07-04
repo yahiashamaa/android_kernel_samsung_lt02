@@ -18,6 +18,9 @@
 #include <linux/slab.h>
 
 #include "internal.h"
+#ifdef CONFIG_MFD_88PM805
+#include <linux/delay.h>
+#endif
 
 struct regmap_irq_chip_data {
 	struct mutex lock;
@@ -58,11 +61,20 @@ static void regmap_irq_sync_unlock(struct irq_data *data)
 	 * suppress pointless writes.
 	 */
 	for (i = 0; i < d->chip->num_regs; i++) {
-		ret = regmap_update_bits(d->map, d->chip->mask_base + i,
+		if (d->chip->mask_invert)
+			ret = regmap_update_bits(d->map, d->chip->mask_base + i,
+					 d->mask_buf_def[i], ~d->mask_buf[i]);
+		else
+			ret = regmap_update_bits(d->map, d->chip->mask_base + i,
 					 d->mask_buf_def[i], d->mask_buf[i]);
 		if (ret != 0)
 			dev_err(d->map->dev, "Failed to sync masks in %x\n",
 				d->chip->mask_base + i);
+	/* need to wait between 32K register for 88PM805 */
+#ifdef CONFIG_MFD_88PM805
+		if (!strcmp("88pm805", d->chip->name))
+		msleep(1);
+#endif
 	}
 
 	mutex_unlock(&d->lock);
@@ -192,6 +204,10 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 	if (!d)
 		return -ENOMEM;
 
+	*data = d;
+
+	*data = d;
+
 	d->status_buf = kzalloc(sizeof(unsigned int) * chip->num_regs,
 				GFP_KERNEL);
 	if (!d->status_buf)
@@ -224,12 +240,22 @@ int regmap_add_irq_chip(struct regmap *map, int irq, int irq_flags,
 	/* Mask all the interrupts by default */
 	for (i = 0; i < chip->num_regs; i++) {
 		d->mask_buf[i] = d->mask_buf_def[i];
-		ret = regmap_write(map, chip->mask_base + i, d->mask_buf[i]);
+		if (chip->mask_invert)
+			ret = regmap_write(map, chip->mask_base + i,
+					~d->mask_buf[i]);
+		else
+			ret = regmap_write(map, chip->mask_base + i,
+					d->mask_buf[i]);
 		if (ret != 0) {
 			dev_err(map->dev, "Failed to set masks in 0x%x: %d\n",
 				chip->mask_base + i, ret);
 			goto err_alloc;
 		}
+/* need to wait between 32K register for 88PM805 */
+#ifdef CONFIG_MFD_88PM805
+		if (!strcmp("88pm805", chip->name))
+		msleep(1);
+#endif
 	}
 
 	/* Register them with genirq */

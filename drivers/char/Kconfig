@@ -6,6 +6,19 @@ menu "Character devices"
 
 source "drivers/tty/Kconfig"
 
+config DEVMEM
+	bool "Memory device driver"
+	default y
+	help
+	  The memory driver provides two character devices, mem and kmem, which
+	  provide access to the system's memory. The mem device is a view of
+	  physical memory, and each byte in the device corresponds to the
+	  matching physical address. The kmem device is the same as mem, but
+	  the addresses correspond to the kernel's virtual address space rather
+	  than physical memory. These devices are standard parts of a Linux
+	  system and most users should say Y here. You might say N if very
+	  security conscience or memory is tight.
+
 config DEVKMEM
 	bool "/dev/kmem virtual device support"
 	default y
@@ -583,6 +596,10 @@ config DEVPORT
 	depends on ISA || PCI
 	default y
 
+config DCC_TTY
+	tristate "DCC tty driver"
+	depends on ARM
+
 source "drivers/s390/char/Kconfig"
 
 config RAMOOPS
@@ -593,6 +610,21 @@ config RAMOOPS
 	  This enables panic and oops messages to be logged to a circular
 	  buffer in RAM where it can be read back at some later point.
 
+config VIBRATOR_88PM80X
+        tristate "88pm80X based vibrator"
+        depends on MFD_88PM800
+        depends on ANDROID_TIMED_OUTPUT
+        default y
+        help
+          Say Y here if you want to enable 88pm860x or 88pm80x vibrator driver
+
+config VIBRATOR_ANDROID
+        tristate "vibrator"
+	depends on ANDROID_TIMED_OUTPUT
+        default y
+        help
+          Say Y here if you want to enable defualt vibrator driver
+
 config MSM_SMD_PKT
 	bool "Enable device interface for some SMD packet ports"
 	default n
@@ -600,6 +632,24 @@ config MSM_SMD_PKT
 	help
 	  Enables userspace clients to read and write to some packet SMD
 	  ports via device interface for MSM chipset.
+
+config PXA9XX_ACIPC
+	tristate "PXA9xx AC-IPC Driver"
+	depends on CPU_PXA910 || CPU_PXA988 || PXA93x || PXA95x
+	help
+	  Please say Y here if want to support Application to
+	  Communication Intel-Processor Communication on PXA910,
+	  PXA93x,PXA95x, PXA978, PXA988 chip
+
+config USB_88PM80X
+	tristate "Marvell USB 88PM80x PMIC support"
+	depends on MFD_88PM800
+	help
+	  Say Y here if you have a 88PM860x PMIC to detect USB Vbus/IDpin event.
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called 88pm80x_usb.
 
 config TILE_SROM
 	bool "Character-device access via hypervisor to the Tilera SPI ROM"
@@ -611,6 +661,8 @@ config TILE_SROM
 	  in /dev/srom/.  The Tilera hypervisor makes the flash
 	  device appear much like a simple EEPROM, and knows
 	  how to partition a single ROM for multiple purposes.
+
+source "drivers/char/maxscend/Kconfig"
 
 endmenu
 

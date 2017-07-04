@@ -14,13 +14,11 @@ config MACH_TAVOREVB3
 config MACH_SAARB
 	bool "PXA955 Handheld Platform (aka SAARB)"
 	select CPU_PXA955
-endif
 
-config PXA_V7_MACH_AUTO
-	def_bool y
-	depends on ARCH_PXA_V7
-	depends on !MACH_SAARB
-	select MACH_TAVOREVB3
+config MACH_NEVODKB
+	bool "PXA978 Handheld Platform (aka NEVODKB)"
+	select CPU_PXA978
+endif
 
 if !ARCH_PXA_V7
 comment "Intel/Marvell Dev Platforms (sorted by hardware release time)"
@@ -678,15 +676,23 @@ config CPU_PXA935
 
 config PXA95x
 	bool
-	select CPU_PJ4
 	help
 	  Select code specific to PXA95x variants
 
 config CPU_PXA955
 	bool
 	select PXA95x
+	select CPU_PJ4
 	help
-	  PXA950 (codename MG1)
+	  PXA955 (codename MG1)
+
+config CPU_PXA978
+	bool
+	select PXA95x
+	select CPU_V7
+	select MIGHT_HAVE_CACHE_L2X0
+	help
+	  PXA978 (codename Nevo)
 
 config PXA_SHARP_C7xx
 	bool
@@ -717,5 +723,17 @@ config PXA_HAVE_ISA_IRQS
 
 config PXA310_ULPI
 	bool
+
+config BT_W8787
+	bool "Enable W8787 driver"
+	default n
+	help
+	  Adds Marvell driver for Marvell W8787 chipset
+
+config BT_MGMT
+	bool "Bluetooth Mgmt"
+	default n
+	help
+	  This is for bluetooth mgmt
 
 endif

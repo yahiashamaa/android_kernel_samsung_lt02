@@ -210,11 +210,19 @@
 	.macro	smp_dmb mode
 #ifdef CONFIG_SMP
 #if __LINUX_ARM_ARCH__ >= 7
+#ifdef CONFIG_PJ4B_ERRATA_6359
+	.ifeqs "\mode","arm"
+	ALT_SMP(dsb)
+	.else
+	ALT_SMP(W(dsb))
+	.endif
+#else
 	.ifeqs "\mode","arm"
 	ALT_SMP(dmb)
 	.else
 	ALT_SMP(W(dmb))
 	.endif
+#endif
 #elif __LINUX_ARM_ARCH__ == 6
 	ALT_SMP(mcr	p15, 0, r0, c7, c10, 5)	@ dmb
 #else
@@ -318,6 +326,14 @@
 \name:
 	.asciz "\string"
 	.size \name , . - \name
+	.endm
+
+	.macro check_uaccess, addr:req, size:req, limit:req, tmp:req, bad:req
+#ifndef CONFIG_CPU_USE_DOMAINS
+	adds	\tmp, \addr, #\size - 1
+	sbcccs	\tmp, \tmp, \limit
+	bcs	\bad
+#endif
 	.endm
 
 #endif /* __ASM_ASSEMBLER_H__ */

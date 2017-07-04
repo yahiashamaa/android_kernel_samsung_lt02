@@ -78,4 +78,18 @@ config ARM_EXYNOS4_BUS_DEVFREQ
 	  To operate with optimal voltages, ASV support is required
 	  (CONFIG_EXYNOS_ASV).
 
+config VPU_DEVFREQ
+	bool "Marvell Soc's VPU devfreq driver"
+	select DEVFREQ_GOV_USERSPACE
+	help
+	  This adds the DEVFREQ driver for Marvell Soc's VPU.
+	  Use the DEVFreq governor 'userspace' as default. This allows
+	  userspace to set the vpu frequency to dedicate frequency.
+
+config DDR_DEVFREQ
+	bool "DDR devfreq driver support"
+	select DEVFREQ_GOV_SIMPLE_ONDEMAND
+	help
+	  This adds the mck4 devfreq driver support for pxa988, mmp3.
+
 endif # PM_DEVFREQ

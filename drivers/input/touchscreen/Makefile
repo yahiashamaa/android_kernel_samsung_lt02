@@ -7,6 +7,7 @@
 wm97xx-ts-y := wm97xx-core.o
 
 obj-$(CONFIG_TOUCHSCREEN_88PM860X)	+= 88pm860x-ts.o
+obj-$(CONFIG_TOUCHSCREEN_FT5306)	+= ft5306_touch.o
 obj-$(CONFIG_TOUCHSCREEN_AD7877)	+= ad7877.o
 obj-$(CONFIG_TOUCHSCREEN_AD7879)	+= ad7879.o
 obj-$(CONFIG_TOUCHSCREEN_AD7879_I2C)	+= ad7879-i2c.o
@@ -51,6 +52,7 @@ obj-$(CONFIG_TOUCHSCREEN_ST1232)	+= st1232.o
 obj-$(CONFIG_TOUCHSCREEN_STMPE)		+= stmpe-ts.o
 obj-$(CONFIG_TOUCHSCREEN_TI_TSCADC)	+= ti_tscadc.o
 obj-$(CONFIG_TOUCHSCREEN_TNETV107X)	+= tnetv107x-ts.o
+obj-$(CONFIG_TOUCHSCREEN_SYNAPTICS_I2C_RMI)	+= synaptics_i2c_rmi.o
 obj-$(CONFIG_TOUCHSCREEN_TOUCHIT213)	+= touchit213.o
 obj-$(CONFIG_TOUCHSCREEN_TOUCHRIGHT)	+= touchright.o
 obj-$(CONFIG_TOUCHSCREEN_TOUCHWIN)	+= touchwin.o
@@ -69,3 +71,13 @@ obj-$(CONFIG_TOUCHSCREEN_WM97XX_MAINSTONE)	+= mainstone-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_WM97XX_ZYLONITE)	+= zylonite-wm97xx.o
 obj-$(CONFIG_TOUCHSCREEN_W90X900)	+= w90p910_ts.o
 obj-$(CONFIG_TOUCHSCREEN_TPS6507X)	+= tps6507x-ts.o
+obj-$(CONFIG_TOUCHSCREEN_VNC)		+= vnc_touch.o
+ifeq ($(CONFIG_MACH_LT02),y)
+obj-$(CONFIG_TOUCHSCREEN_MMS136_TS) += mfs_gpio_i2c.o mms100_isp.o mms100_cfg_update.o mms136_ts_lt02.o
+else ifeq ($(CONFIG_MACH_COCOA7),y)
+obj-$(CONFIG_TOUCHSCREEN_MMS136_TS) += mfs_gpio_i2c.o mms100_isp.o mms100_cfg_update.o mms136_ts_lt02.o
+else
+obj-$(CONFIG_TOUCHSCREEN_MMS136_TS) += mfs_gpio_i2c.o mms100_isp.o mms100_cfg_update.o mms136_ts.o
+endif
+obj-$(CONFIG_TOUCHSCREEN_ZINITIX_BT432) += zinitix_bt432_ts.o
+obj-$(CONFIG_TOUCHSCREEN_BT532_TS) += bt532_ts.o

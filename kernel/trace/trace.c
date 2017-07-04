@@ -1529,12 +1529,13 @@ int trace_vbprintk(unsigned long ip, const char *fmt, va_list args)
 	cpu = raw_smp_processor_id();
 	data = tr->data[cpu];
 
+	/* Lockdep uses trace_printk for lock tracing */
+	local_irq_save(flags);
+
 	disable = atomic_inc_return(&data->disabled);
 	if (unlikely(disable != 1))
 		goto out;
 
-	/* Lockdep uses trace_printk for lock tracing */
-	local_irq_save(flags);
 	arch_spin_lock(&trace_buf_lock);
 	len = vbin_printf(trace_buf, TRACE_BUF_SIZE, fmt, args);
 
@@ -1559,10 +1560,10 @@ int trace_vbprintk(unsigned long ip, const char *fmt, va_list args)
 
 out_unlock:
 	arch_spin_unlock(&trace_buf_lock);
-	local_irq_restore(flags);
 
 out:
 	atomic_dec_return(&data->disabled);
+	local_irq_restore(flags);
 	preempt_enable_notrace();
 	unpause_graph_tracing();
 
@@ -1608,12 +1609,13 @@ int trace_array_vprintk(struct trace_array *tr,
 	cpu = raw_smp_processor_id();
 	data = tr->data[cpu];
 
+	pause_graph_tracing();
+	raw_local_irq_save(irq_flags);
+
 	disable = atomic_inc_return(&data->disabled);
 	if (unlikely(disable != 1))
 		goto out;
 
-	pause_graph_tracing();
-	raw_local_irq_save(irq_flags);
 	arch_spin_lock(&trace_buf_lock);
 	len = vsnprintf(trace_buf, TRACE_BUF_SIZE, fmt, args);
 
@@ -1635,10 +1637,10 @@ int trace_array_vprintk(struct trace_array *tr,
 
  out_unlock:
 	arch_spin_unlock(&trace_buf_lock);
-	raw_local_irq_restore(irq_flags);
-	unpause_graph_tracing();
  out:
 	atomic_dec_return(&data->disabled);
+	raw_local_irq_restore(irq_flags);
+	unpause_graph_tracing();
 	preempt_enable_notrace();
 
 	return len;
@@ -4680,6 +4682,52 @@ static const struct file_operations rb_simple_fops = {
 	.llseek		= default_llseek,
 };
 
+static ssize_t
+tracing_noncached_read(struct file *filp, char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	char buf[96];
+	int r;
+
+	r = sprintf(buf, "enable_trace_buffer_noncached=%d,non_cache_set=%d\n",
+			enable_change_trace_buffer, non_cache_set);
+	return simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
+}
+
+static ssize_t
+tracing_noncached_write(struct file *filp, const char __user *ubuf,
+		size_t cnt, loff_t *ppos)
+{
+	unsigned long val;
+	int ret;
+
+	ret = kstrtoul_from_user(ubuf, cnt, 10, &val);
+	if (ret)
+		return ret;
+
+	if (non_cache_set)
+		pr_info("WARNING: can not switch since trace has been working!!\n");
+	else {
+		if (val) {
+			pr_info("ATTENTION:set trace buffer non-cachable!!!\n");
+			enable_change_trace_buffer = 1;
+		} else {
+			pr_info("ATTENTION:set trace buffer cachable!!!\n");
+			enable_change_trace_buffer = 0;
+		}
+	}
+	*ppos += cnt;
+
+	return cnt;
+}
+
+static const struct file_operations tracing_noncached_fops = {
+	.open		= tracing_open_generic,
+	.read		= tracing_noncached_read,
+	.write		= tracing_noncached_write,
+	.llseek		= default_llseek,
+};
+
 static __init int tracer_init_debugfs(void)
 {
 	struct dentry *d_tracer;
@@ -4741,6 +4789,9 @@ static __init int tracer_init_debugfs(void)
 
 	trace_create_file("tracing_on", 0644, d_tracer,
 			    &global_trace, &rb_simple_fops);
+
+	trace_create_file("trace_noncached_on", 0644, d_tracer,
+			    NULL, &tracing_noncached_fops);
 
 #ifdef CONFIG_DYNAMIC_FTRACE
 	trace_create_file("dyn_ftrace_total_info", 0444, d_tracer,

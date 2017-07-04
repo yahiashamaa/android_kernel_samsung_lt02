@@ -30,6 +30,36 @@
 #include <linux/of_gpio.h>
 #include <linux/spinlock.h>
 
+#if defined(CONFIG_MACH_LT02)
+#include <mach/mfp-pxa986-lt02.h>
+#elif defined(CONFIG_MACH_COCOA7)
+#include <mach/mfp-pxa986-cocoa7.h>
+#endif
+
+#if defined(CONFIG_CPU_PXA988) || defined(CONFIG_CPU_PXA1088)
+#include <linux/delay.h>
+#include <mach/gpio-edge.h>
+#endif
+
+#if defined(CONFIG_KERNEL_DEBUG_SEC) && (defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7))
+#define MY_NAME "gpio_keys"
+
+#if defined(CONFIG_SAMSUNG_PRODUCT_SHIP)
+#define key_dbg(fmt, arg...)
+#else
+#define key_dbg(fmt, arg...) printk(KERN_NOTICE "%s: " fmt, MY_NAME, ## arg)
+#endif
+
+extern struct class *sec_class;
+extern int jack_is_detected;
+extern unsigned int sec_debug_mode;
+static bool g_bVolUp;
+static bool g_bPower;
+static bool g_bHome;
+static struct timer_list debug_timer;
+extern void dump_all_task_info();
+#endif
+
 struct gpio_button_data {
 	const struct gpio_keys_button *button;
 	struct input_dev *input;
@@ -40,10 +70,20 @@ struct gpio_button_data {
 	spinlock_t lock;
 	bool disabled;
 	bool key_pressed;
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+	bool key_state;
+#endif
+#if defined(CONFIG_CPU_PXA988) || defined(CONFIG_CPU_PXA1088)
+	struct gpio_edge_desc *gpio_key;
+	struct delayed_work input_work;
+#endif
 };
 
 struct gpio_keys_drvdata {
 	struct input_dev *input;
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+	struct device *sec_key;
+#endif
 	struct mutex disable_lock;
 	unsigned int n_buttons;
 	int (*enable)(struct device *dev);
@@ -324,6 +364,111 @@ static struct attribute_group gpio_keys_attr_group = {
 	.attrs = gpio_keys_attrs,
 };
 
+#if defined(CONFIG_KERNEL_DEBUG_SEC) && (defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7))
+void enter_upload_mode(unsigned long val)
+{
+	if (g_bVolUp && jack_is_detected && g_bPower)
+		if (sec_debug_mode == DEBUG_LEVEL_MID || sec_debug_mode == DEBUG_LEVEL_HIGH) {
+			dump_all_task_info();
+			//dump_cpu_stat();
+			panic("__forced_upload");
+		}
+}
+
+bool gpio_keys_getstate(int keycode)
+{
+	switch (keycode) {
+	case KEY_VOLUMEUP:
+		return g_bVolUp;
+	case KEY_POWER:
+		return g_bPower;
+	case KEY_HOMEPAGE:
+		return g_bHome;
+	default:
+		break;
+	}
+	return 0;
+}
+EXPORT_SYMBOL(gpio_keys_getstate);
+
+void gpio_keys_setstate(int keycode, bool bState)
+{
+	switch (keycode) {
+	case KEY_VOLUMEUP:
+		g_bVolUp = bState;
+		break;
+	case KEY_POWER:
+		g_bPower = bState;
+		break;
+	case KEY_HOMEPAGE:
+		g_bHome = bState;
+		break;
+	default:
+		break;
+	}
+}
+EXPORT_SYMBOL(gpio_keys_setstate);
+
+void gpio_keys_start_upload_modtimer(void)
+{
+	mod_timer(&debug_timer, jiffies + HZ*1);
+	printk(KERN_ERR "%s Waiting for upload mode for 1 second.\n", __func__);
+}
+EXPORT_SYMBOL(gpio_keys_start_upload_modtimer);
+#endif
+
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+static ssize_t key_pressed_show(struct device *dev,
+				struct device_attribute *attr, char *buf)
+{
+	struct gpio_keys_drvdata *ddata = dev_get_drvdata(dev);
+	int i;
+	int keystate = 0;
+
+	for (i = 0; i < ddata->n_buttons; i++) {
+		struct gpio_button_data *bdata = &ddata->data[i];
+		keystate |= bdata->key_state;
+	}
+
+	if (keystate)
+		sprintf(buf, "PRESS");
+	else
+		sprintf(buf, "RELEASE");
+	return strlen(buf);
+}
+
+static DEVICE_ATTR(sec_key_pressed, 0664, key_pressed_show, NULL);
+
+static struct attribute *sec_key_attrs[] = {
+	&dev_attr_sec_key_pressed.attr,
+	NULL,
+};
+
+static struct attribute_group sec_key_attr_group = {
+	.attrs = sec_key_attrs,
+};
+
+int lpm_poweroff = 0;
+EXPORT_SYMBOL(lpm_poweroff);
+
+static ssize_t lpm_poweroff_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t count)
+{
+
+	if (!count)
+		return -EINVAL;
+
+	printk(KERN_ERR "%s buf = %c\n", __func__, *buf);
+
+	if (*buf == '1')
+		lpm_poweroff = 1;
+
+	return count;
+}
+
+static DEVICE_ATTR(sec_lpm_poweroff, S_IWUSR | S_IWGRP, NULL, lpm_poweroff_store);
+#endif
+
 static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 {
 	const struct gpio_keys_button *button = bdata->button;
@@ -331,10 +476,29 @@ static void gpio_keys_gpio_report_event(struct gpio_button_data *bdata)
 	unsigned int type = button->type ?: EV_KEY;
 	int state = (gpio_get_value_cansleep(button->gpio) ? 1 : 0) ^ button->active_low;
 
+#if defined(CONFIG_KERNEL_DEBUG_SEC) && (defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7))
+	key_dbg("%s gpio_keys_report_event state = %d \n", button->desc, state);
+
+	bool bState = state ? true : false;
+	switch (button->code) {
+	case KEY_VOLUMEUP:
+		g_bVolUp = bState;
+		break;
+	case KEY_HOMEPAGE:
+		g_bHome = bState;
+		break;
+	default:
+		break;
+	}
+#endif
+
 	if (type == EV_ABS) {
 		if (state)
 			input_event(input, type, button->code, button->value);
 	} else {
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+		bdata->key_state = !!state;
+#endif
 		input_event(input, type, button->code, !!state);
 	}
 	input_sync(input);
@@ -417,6 +581,30 @@ out:
 	return IRQ_HANDLED;
 }
 
+#if defined(CONFIG_CPU_PXA988) || defined(CONFIG_CPU_PXA1088)
+static void pxa27x_keypad_delay_wq(struct work_struct *work)
+{
+	struct gpio_button_data *bdata =
+		container_of(work, struct gpio_button_data, input_work.work);
+
+	input_report_key(bdata->input, bdata->button->code, 1);
+	input_report_key(bdata->input, bdata->button->code, 0);
+	input_sync(bdata->input);
+	return;
+}
+
+void trigger_wakeup(int mfp, void *data)
+{
+	struct gpio_button_data *bdata = ((struct gpio_button_data *)data);
+
+	/* Fixed for duplicated home_key event when wake up. */
+	/*
+	schedule_delayed_work(&bdata->input_work, msecs_to_jiffies(10));
+	*/
+	return;
+}
+#endif
+
 static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
 					 struct input_dev *input,
 					 struct gpio_button_data *bdata,
@@ -468,6 +656,16 @@ static int __devinit gpio_keys_setup_key(struct platform_device *pdev,
 		}
 		bdata->irq = irq;
 
+#if defined(CONFIG_CPU_PXA988) || defined(CONFIG_CPU_PXA1088)
+		if (button->wakeup) {
+			bdata->gpio_key = kzalloc(sizeof(struct gpio_edge_desc), GFP_KERNEL);
+			bdata->gpio_key->mfp = button->gpio;
+			bdata->gpio_key->handler = trigger_wakeup;
+			bdata->gpio_key->data = bdata;
+			mmp_gpio_edge_add(bdata->gpio_key);
+			INIT_DELAYED_WORK(&bdata->input_work, pxa27x_keypad_delay_wq);
+		}
+#endif
 		INIT_WORK(&bdata->work, gpio_keys_gpio_work_func);
 		setup_timer(&bdata->timer,
 			    gpio_keys_gpio_timer, (unsigned long)bdata);
@@ -640,6 +838,7 @@ static void gpio_remove_key(struct gpio_button_data *bdata)
 	if (bdata->timer_debounce)
 		del_timer_sync(&bdata->timer);
 	cancel_work_sync(&bdata->work);
+	cancel_delayed_work_sync(&bdata->input_work);
 	if (gpio_is_valid(bdata->button->gpio))
 		gpio_free(bdata->button->gpio);
 }
@@ -653,6 +852,9 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 	struct input_dev *input;
 	int i, error;
 	int wakeup = 0;
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+	struct device *sec_lpm;
+#endif
 
 	if (!pdata) {
 		error = gpio_keys_get_devtree_pdata(dev, &alt_pdata);
@@ -695,6 +897,11 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 	if (pdata->rep)
 		__set_bit(EV_REP, input->evbit);
 
+#if defined(CONFIG_CPU_PXA988) || defined(CONFIG_CPU_PXA1088)
+	input->evbit[0] = BIT_MASK(EV_KEY) | BIT_MASK(EV_ABS);
+	input_set_capability(input, EV_MSC, MSC_SCAN);
+#endif
+
 	for (i = 0; i < pdata->nbuttons; i++) {
 		const struct gpio_keys_button *button = &pdata->buttons[i];
 		struct gpio_button_data *bdata = &ddata->data[i];
@@ -714,6 +921,23 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 		goto fail2;
 	}
 
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+	ddata->sec_key = device_create(sec_class, NULL, 0, ddata, "sec_key");
+	if (IS_ERR(ddata->sec_key))
+		dev_err(dev, "Failed to create sec_key device\n");
+
+	error = sysfs_create_group(&ddata->sec_key->kobj, &sec_key_attr_group);
+	if (error) {
+		dev_err(dev, "Unable to export sec_key device, error: %d\n", error);
+		goto fail2;
+	}
+
+	sec_lpm = device_create(sec_class, NULL, 0, "%s", "lpm");
+
+	if (device_create_file(sec_lpm, &dev_attr_sec_lpm_poweroff) < 0)
+			printk("Failed to create device file(%s)!\n", dev_attr_sec_lpm_poweroff.attr.name);
+#endif
+
 	error = input_register_device(input);
 	if (error) {
 		dev_err(dev, "Unable to register input device, error: %d\n",
@@ -731,10 +955,19 @@ static int __devinit gpio_keys_probe(struct platform_device *pdev)
 
 	device_init_wakeup(&pdev->dev, wakeup);
 
+#if defined(CONFIG_KERNEL_DEBUG_SEC) && (defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7))
+	/* Initialize for Forced Upload mode */
+	init_timer(&debug_timer);
+	debug_timer.function = enter_upload_mode;
+#endif
+
 	return 0;
 
  fail3:
 	sysfs_remove_group(&pdev->dev.kobj, &gpio_keys_attr_group);
+#if defined(CONFIG_MACH_LT02) || defined(CONFIG_MACH_COCOA7)
+	sysfs_remove_group(&ddata->sec_key->kobj, &sec_key_attr_group);
+#endif
  fail2:
 	while (--i >= 0)
 		gpio_remove_key(&ddata->data[i]);

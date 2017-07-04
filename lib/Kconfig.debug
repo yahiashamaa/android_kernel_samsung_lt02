@@ -10,6 +10,31 @@ config PRINTK_TIME
 	  in kernel startup.  Or add printk.time=1 at boot-time.
 	  See Documentation/kernel-parameters.txt
 
+config PRINTK_CPU_ID
+	bool "Show cpu id on printks"
+	depends on PRINTK
+	help
+	  Selecting this option causes current printk cpu id to be
+	  included in printk output. Or add printk.cpu=1 at boot-time.
+	  See Documentation/kernel-parameters.txt
+
+config PRINTK_PID
+	bool "Show pid on printks"
+	depends on PRINTK
+	help
+	  Selecting this option causes current task's pid to be
+	  included in printk output. Or add printk.pid=1 at boot-time.
+	  This allows you to see the running process with kernel log.
+	  See Documentation/kernel-parameters.txt
+
+config PRINTK_COMM
+	bool "Show comm on printks"
+	depends on PRINTK
+	help
+	  Selecting this option causes current task's comm to be
+	  included in printk output. This allows you to see the running process with kernel log.
+	  See Documentation/kernel-parameters.txt
+
 config DEFAULT_MESSAGE_LOGLEVEL
 	int "Default message log level (1-7)"
 	range 1 7
@@ -185,6 +210,15 @@ config LOCKUP_DETECTOR
 config HARDLOCKUP_DETECTOR
 	def_bool LOCKUP_DETECTOR && PERF_EVENTS && HAVE_PERF_EVENTS_NMI && \
 		 !HAVE_NMI_WATCHDOG
+
+config SMP_HARDLOCKUP_DETECTOR
+	bool "Detect hard lockups on SMP systems"
+	depends on SMP
+	help
+	  Say Y to enable hard lockup detector on SMP systems without NMI.
+	  The SMP_HARDLOCKUP_DETECTOR can work only when there are two or
+	  more CPUs online (alive). If there is only one CPU, this detector
+	  will not work.
 
 config BOOTPARAM_HARDLOCKUP_PANIC
 	bool "Panic (Reboot) On Hard Lockups"
@@ -676,8 +710,9 @@ config DEBUG_LOCKING_API_SELFTESTS
 	  mutexes and rwsems.
 
 config STACKTRACE
-	bool
+	bool "Stacktrace"
 	depends on STACKTRACE_SUPPORT
+	default y
 
 config DEBUG_STACK_USAGE
 	bool "Stack utilization instrumentation"
@@ -1286,6 +1321,13 @@ config ASYNC_RAID6_TEST
 	  N-disk array.  Recovery is performed with the asynchronous
 	  raid6 recovery routines, and will optionally use an offload
 	  engine if one is available.
+
+	  If unsure, say N.
+
+config REGDUMP
+	bool "perform regdump while in running time or crash"
+	---help---
+	  This is register dump framework
 
 	  If unsure, say N.
 

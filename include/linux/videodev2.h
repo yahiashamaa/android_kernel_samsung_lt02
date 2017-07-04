@@ -1264,8 +1264,48 @@ enum v4l2_colorfx {
 
 #define V4L2_CID_ALPHA_COMPONENT		(V4L2_CID_BASE+41)
 
+
+/**++ Add the Cam CTRL Functions : 20120531 dhee79.lee@samsung.com ++**/
+#define V4L2_CID_SCENE							(V4L2_CID_BASE+42)
+#define V4L2_CID_EFFECT							(V4L2_CID_BASE+43)
+#define V4L2_CID_ISO							(V4L2_CID_BASE+44)
+#define V4L2_CID_PHOTOMETRY					(V4L2_CID_BASE+45)
+#define V4L2_CID_QUALITY						(V4L2_CID_BASE+46)
+#define V4L2_CID_CAMERA_CHECK_DATALINE	 	(V4L2_CID_BASE+47)
+#define V4L2_CID_CAMERA_CHECK_DATALINE_STOP (V4L2_CID_BASE+48)
+#define V4L2_CID_FPS							(V4L2_CID_BASE+49)
+#define V4L2_CID_FRAME_TIME					(V4L2_CID_BASE+50)
+#define V4L2_CID_SELECT_MODE				(V4L2_CID_BASE+51)
+#define V4L2_CID_CAMERA_PREVIEW_SIZE		(V4L2_CID_BASE+52)
+#define V4L2_CID_FOCUS_MODE					(V4L2_CID_BASE+53)
+#define V4L2_CID_AF							(V4L2_CID_BASE+54)
+#define V4L2_CID_AF_STATUS					(V4L2_CID_BASE+55)
+#define V4L2_CID_AF_2nd_STATUS					(V4L2_CID_BASE+56)
+#define V4L2_CID_CAMERA_OBJECT_POSITION_X	(V4L2_CID_BASE+57)
+#define V4L2_CID_CAMERA_OBJECT_POSITION_Y	(V4L2_CID_BASE+58)
+#define V4L2_CID_AF_POSITION_START			(V4L2_CID_BASE+59)
+#define V4L2_CID_AF_POSITION_STOP			(V4L2_CID_BASE+60)
+#define V4L2_CID_AE_LOCK					(V4L2_CID_BASE+61)
+#define V4L2_CID_LIGHTNESS_CHECK					(V4L2_CID_BASE+62)
+//#define V4L2_CID_VFLIP						(V4L2_CID_BASE+63)
+#define V4L2_CID_FOCUS_MODE_STEP1 (V4L2_CID_BASE+64)
+#define V4L2_CID_FOCUS_MODE_STEP2 (V4L2_CID_BASE+65)
+#define V4L2_CID_FOCUS_MODE_STEP3 (V4L2_CID_BASE+66)
+#define V4L2_CID_ESD_CHECK (V4L2_CID_BASE+67)
+#define V4L2_CID_SET_STILL_STATUS	(V4L2_CID_BASE + 68)
+#define V4L2_CID_SET_PREVIEW_STATUS	(V4L2_CID_BASE + 69)
+#define V4L2_CID_PRIVATE_GET_FRAME_TIME	(V4L2_CID_BASE + 70)
+#define V4L2_CID_GET_AF_STATUS (V4L2_CID_BASE+71)
+#define V4L2_CID_GET_EXIF_EXPOSURETIME_DENOMINAL (V4L2_CID_BASE+72)
+#define V4L2_CID_GET_EXIF_ISO_SPEED (V4L2_CID_BASE+73)
+#define V4L2_CID_GET_EXIF_FLASH (V4L2_CID_BASE+74)
+#define V4L2_CID_SET_FLASH_STATUS	(V4L2_CID_BASE + 75)
+#define V4L2_CID_SET_FLASH_MODE	(V4L2_CID_BASE + 76)
+#define V4L2_CID_GET_FLASH_STATUS	(V4L2_CID_BASE + 77)
+/**-- Add the Cam CTRL Functions : 20120531 dhee79.lee@samsung.com --**/
+
 /* last CID + 1 */
-#define V4L2_CID_LASTP1                         (V4L2_CID_BASE+42)
+#define V4L2_CID_LASTP1                         (V4L2_CID_BASE+78)
 
 /*  MPEG-class control IDs defined by V4L2 */
 #define V4L2_CID_MPEG_BASE 			(V4L2_CTRL_CLASS_MPEG | 0x900)
@@ -1993,6 +2033,11 @@ struct v4l2_decoder_cmd {
 		} raw;
 	};
 };
+/* For samsung project, transfer preview/capture mode into Linux driver, by Vincent Wan */
+struct v4l2_mode_transfer {
+	__u32				type;
+	__u32				reserved[7];
+};
 #endif
 
 
@@ -2334,10 +2379,13 @@ struct v4l2_create_buffers {
 #define VIDIOC_S_TUNER		 _IOW('V', 30, struct v4l2_tuner)
 #define VIDIOC_G_AUDIO		 _IOR('V', 33, struct v4l2_audio)
 #define VIDIOC_S_AUDIO		 _IOW('V', 34, struct v4l2_audio)
+#define VIDIOC_G_EXIF		_IOWR('V', 35, struct v4l2_exif_info) // Add by DHL : 20120531
 #define VIDIOC_QUERYCTRL	_IOWR('V', 36, struct v4l2_queryctrl)
 #define VIDIOC_QUERYMENU	_IOWR('V', 37, struct v4l2_querymenu)
 #define VIDIOC_G_INPUT		 _IOR('V', 38, int)
 #define VIDIOC_S_INPUT		_IOWR('V', 39, int)
+#define VIDIOC_S_THUMBNAIL		_IOWR('V', 40, struct v4l2_pix_format) // Add by DHL : 20120531
+#define VIDIOC_AE_AWB_STATUS		 _IOWR('V', 41, int) // Add by DHL : 20120531
 #define VIDIOC_G_OUTPUT		 _IOR('V', 46, int)
 #define VIDIOC_S_OUTPUT		_IOWR('V', 47, int)
 #define VIDIOC_ENUMOUTPUT	_IOWR('V', 48, struct v4l2_output)
@@ -2407,6 +2455,9 @@ struct v4l2_create_buffers {
    versions. */
 #define VIDIOC_DECODER_CMD	_IOWR('V', 96, struct v4l2_decoder_cmd)
 #define VIDIOC_TRY_DECODER_CMD	_IOWR('V', 97, struct v4l2_decoder_cmd)
+
+/* For samsung project, transfer preview/capture mode into Linux driver, by Vincent Wan */
+#define	VIDIOC_MODE_TRANSFER  _IOW('V', 98, struct v4l2_mode_transfer)
 
 /* Reminder: when adding new ioctls please add support for them to
    drivers/media/video/v4l2-compat-ioctl32.c as well! */

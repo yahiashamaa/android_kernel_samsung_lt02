@@ -137,9 +137,15 @@ config REGULATOR_ISL6271A
 
 config REGULATOR_88PM8607
 	bool "Marvell 88PM8607 Power regulators"
-	depends on MFD_88PM860X=y
+	depends on MFD_88PM860X
 	help
 	  This driver supports 88PM8607 voltage regulator chips.
+
+config REGULATOR_88PM800
+	bool "Marvell 88PM800 Power regulators"
+	depends on MFD_88PM800
+	help
+	  This driver supports 88PM800 voltage regulator chips.
 
 config REGULATOR_MAX1586
 	tristate "Maxim 1586/1587 voltage regulator"
@@ -365,6 +371,16 @@ config REGULATOR_WM8994
 	help
 	  This driver provides support for the voltage regulators on the
 	  WM8994 CODEC.
+
+config REGULATOR_FAN53555
+	tristate "Fairchild FAN5355 Regulator"
+	depends on I2C
+	help
+	  This driver supports Fairchild FAN5355 Digitally Programmable
+	  TinyBuck Regulator. The FAN53555 is a step-down switching voltage
+	  regulator that delivers a digitally programmable output from an
+	  input voltage supply of 2.5V to 5.5V. The output voltage is
+	  programmed through an I2C interface.
 
 endif
 

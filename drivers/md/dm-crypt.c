@@ -178,6 +178,7 @@ struct crypt_config {
 #define MIN_POOL_PAGES 32
 
 static struct kmem_cache *_crypt_io_pool;
+static DEFINE_SPINLOCK(crypt_lock);
 
 static void clone_init(struct dm_crypt_io *, struct bio *);
 static void kcryptd_queue_crypt(struct dm_crypt_io *io);
@@ -185,7 +186,12 @@ static u8 *iv_of_dmreq(struct crypt_config *cc, struct dm_crypt_request *dmreq);
 
 static struct crypt_cpu *this_crypt_config(struct crypt_config *cc)
 {
-	return this_cpu_ptr(cc->cpu);
+	struct crypt_cpu *cpu;
+	unsigned long flags;
+	spin_lock_irqsave(&crypt_lock,flags);
+	cpu = this_cpu_ptr(cc->cpu);
+	spin_unlock_irqrestore(&crypt_lock, flags);
+	return cpu;
 }
 
 /*
@@ -193,7 +199,13 @@ static struct crypt_cpu *this_crypt_config(struct crypt_config *cc)
  */
 static struct crypto_ablkcipher *any_tfm(struct crypt_config *cc)
 {
-	return __this_cpu_ptr(cc->cpu)->tfms[0];
+	struct crypto_ablkcipher * ret;
+	unsigned long flags;
+	spin_lock_irqsave(&crypt_lock,flags);
+	ret = __this_cpu_ptr(cc->cpu)->tfms[0];
+	spin_unlock_irqrestore(&crypt_lock, flags);
+
+	return ret;
 }
 
 /*
@@ -746,9 +758,9 @@ static void kcryptd_async_done(struct crypto_async_request *async_req,
 			       int error);
 
 static void crypt_alloc_req(struct crypt_config *cc,
-			    struct convert_context *ctx)
+			    struct convert_context *ctx,
+			    struct crypt_cpu *this_cc)
 {
-	struct crypt_cpu *this_cc = this_crypt_config(cc);
 	unsigned key_index = ctx->sector & (cc->tfms_count - 1);
 
 	if (!this_cc->req)
@@ -774,7 +786,7 @@ static int crypt_convert(struct crypt_config *cc,
 	while(ctx->idx_in < ctx->bio_in->bi_vcnt &&
 	      ctx->idx_out < ctx->bio_out->bi_vcnt) {
 
-		crypt_alloc_req(cc, ctx);
+		crypt_alloc_req(cc, ctx, this_cc);
 
 		atomic_inc(&ctx->pending);
 
@@ -1682,20 +1694,27 @@ static int crypt_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	ret = -ENOMEM;
+#if 1
+	cc->io_queue = create_singlethread_workqueue("kcryptd_io");
+#else
 	cc->io_queue = alloc_workqueue("kcryptd_io",
 				       WQ_NON_REENTRANT|
 				       WQ_MEM_RECLAIM,
 				       1);
+#endif
 	if (!cc->io_queue) {
 		ti->error = "Couldn't create kcryptd io queue";
 		goto bad;
 	}
-
+#if 1
+	cc->crypt_queue = create_singlethread_workqueue("kcryptd");
+#else
 	cc->crypt_queue = alloc_workqueue("kcryptd",
 					  WQ_NON_REENTRANT|
 					  WQ_CPU_INTENSIVE|
 					  WQ_MEM_RECLAIM,
 					  1);
+#endif
 	if (!cc->crypt_queue) {
 		ti->error = "Couldn't create kcryptd queue";
 		goto bad;

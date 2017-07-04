@@ -22,6 +22,22 @@
 
 #include <asm/local.h>
 #include "trace.h"
+#include <linux/vmalloc.h>
+#include <asm/cacheflush.h>
+
+unsigned char non_cache_set;
+unsigned char enable_change_trace_buffer;
+static void *remap_noncached_page(struct page *page)
+{
+	void *start;
+	memset(page_address(page), 0, PAGE_SIZE);
+	dmac_flush_range(page_address(page), page_address(page) + PAGE_SIZE);
+	outer_flush_range(__pa(page_address(page)),
+			__pa(page_address(page)) + PAGE_SIZE);
+
+	start = vmap(&page, 1, 0, pgprot_noncached(pgprot_kernel));
+	return start;
+}
 
 /*
  * The ring buffer header is special. We must manually up keep it.
@@ -349,6 +365,9 @@ struct buffer_page {
 	local_t		 entries;	/* entries on this page */
 	unsigned long	 real_end;	/* real end of data */
 	struct buffer_data_page *page;	/* Actual data page */
+	unsigned long *cached_page;	/* MARVELL: cached page addr for free */
+	unsigned long *struct_page;	/* MARVELL: the struct
+					   located non-cached page */
 };
 
 /*
@@ -389,8 +408,20 @@ size_t ring_buffer_page_len(void *page)
  */
 static void free_buffer_page(struct buffer_page *bpage)
 {
-	free_page((unsigned long)bpage->page);
-	kfree(bpage);
+	if (non_cache_set == 1) {
+		/*
+		 * Free pages of trace buffer.
+		 */
+		free_page((unsigned long)bpage->cached_page);
+		/*
+		 * Free non-cached pages which hold structs.
+		 */
+		if ((unsigned long)(bpage->struct_page))
+			free_page((unsigned long)(bpage->struct_page));
+	} else {
+		free_page((unsigned long)bpage->cached_page);
+		kfree(bpage);
+	}
 }
 
 /*
@@ -969,19 +1000,21 @@ static int rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
 	struct buffer_page *bpage, *tmp;
 	LIST_HEAD(pages);
 	unsigned i;
+	struct page *page;
 
 	WARN_ON(!nr_pages);
 
 	for (i = 0; i < nr_pages; i++) {
-		struct page *page;
 		/*
 		 * __GFP_NORETRY flag makes sure that the allocation fails
 		 * gracefully without invoking oom-killer and the system is
 		 * not destabilized.
 		 */
-		bpage = kzalloc_node(ALIGN(sizeof(*bpage), cache_line_size()),
-				    GFP_KERNEL | __GFP_NORETRY,
-				    cpu_to_node(cpu_buffer->cpu));
+		bpage = kzalloc_node(ALIGN(sizeof(*bpage),
+						cache_line_size()),
+					GFP_KERNEL | __GFP_NORETRY,
+					cpu_to_node(cpu_buffer->cpu));
+
 		if (!bpage)
 			goto free_pages;
 
@@ -991,9 +1024,12 @@ static int rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
 
 		page = alloc_pages_node(cpu_to_node(cpu_buffer->cpu),
 					GFP_KERNEL | __GFP_NORETRY, 0);
+
 		if (!page)
 			goto free_pages;
+		bpage->cached_page = page_address(page);
 		bpage->page = page_address(page);
+
 		rb_init_page(bpage->page);
 	}
 
@@ -1004,7 +1040,6 @@ static int rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
 	 */
 	cpu_buffer->pages = pages.next;
 	list_del(&pages);
-
 	rb_check_pages(cpu_buffer);
 
 	return 0;
@@ -1026,7 +1061,7 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, int cpu)
 	int ret;
 
 	cpu_buffer = kzalloc_node(ALIGN(sizeof(*cpu_buffer), cache_line_size()),
-				  GFP_KERNEL, cpu_to_node(cpu));
+			GFP_KERNEL, cpu_to_node(cpu));
 	if (!cpu_buffer)
 		return NULL;
 
@@ -1037,7 +1072,8 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, int cpu)
 	cpu_buffer->lock = (arch_spinlock_t)__ARCH_SPIN_LOCK_UNLOCKED;
 
 	bpage = kzalloc_node(ALIGN(sizeof(*bpage), cache_line_size()),
-			    GFP_KERNEL, cpu_to_node(cpu));
+			GFP_KERNEL, cpu_to_node(cpu));
+
 	if (!bpage)
 		goto fail_free_buffer;
 
@@ -1045,9 +1081,12 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, int cpu)
 
 	cpu_buffer->reader_page = bpage;
 	page = alloc_pages_node(cpu_to_node(cpu), GFP_KERNEL, 0);
+	bpage->cached_page = page_address(page);
 	if (!page)
 		goto fail_free_reader;
+
 	bpage->page = page_address(page);
+
 	rb_init_page(bpage->page);
 
 	INIT_LIST_HEAD(&cpu_buffer->reader_page->list);
@@ -1069,6 +1108,7 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, int cpu)
 
  fail_free_buffer:
 	kfree(cpu_buffer);
+
 	return NULL;
 }
 
@@ -1222,6 +1262,167 @@ void ring_buffer_set_clock(struct ring_buffer *buffer,
 
 static void rb_reset_cpu(struct ring_buffer_per_cpu *cpu_buffer);
 
+/*
+ * The fucntion put structs into one page, which include cpu_buffer,
+ * reader_page, buffer_page.
+ */
+static struct ring_buffer_per_cpu *
+rb_switch_cpu_buffer(struct ring_buffer *buffer, int cpu)
+{
+	struct ring_buffer_per_cpu *cpu_buffer;
+	struct buffer_page *bpage, *p, *tmp;
+	struct page *page, *page_s;
+	void *start_struct, *start;
+	unsigned nr_pages = 0;
+	struct page **pages_list = NULL;
+
+	/* init list head for each cpu */
+	LIST_HEAD(pages);
+	LIST_HEAD(pages_l);
+
+	rb_head_page_deactivate(buffer->buffers[cpu]);
+
+	/*
+	 * for each cpu, allocate a page to hold the struct of
+	 * a cpu_buffer, struct buffer_pages of a new reader
+	 * and two pages
+	 */
+	page_s = alloc_pages_node(cpu_to_node(cpu),
+			GFP_KERNEL, 0);
+	if (!page_s)
+		return NULL;
+	start_struct = remap_noncached_page(page_s);
+	start = start_struct;
+	if (!start) {
+		printk(KERN_WARNING
+				"trace:switch non-cached:"
+				"vmap cpu_buffer fail.\n");
+		goto fail_free_struct_page;
+	}
+	cpu_buffer = start;
+	memcpy(cpu_buffer, buffer->buffers[cpu], sizeof(*cpu_buffer));
+
+	/* new a reader page */
+	start += ALIGN(sizeof(*cpu_buffer), cache_line_size());
+	bpage = start;
+	memcpy(bpage, buffer->buffers[cpu]->reader_page,
+			sizeof(*bpage));
+
+	page = alloc_pages_node(cpu_to_node(cpu),
+			GFP_KERNEL, 0);
+
+	if (!page)
+		goto fail_free_struct;
+	bpage->cached_page = page_address(page);
+	bpage->page = remap_noncached_page(page);
+	if (!bpage->page) {
+		printk(KERN_WARNING
+				"trace:switch non-cached:"
+				"vmap reader page fail.\n");
+		free_page((unsigned int)page_address(page));
+		goto fail_free_struct;
+	}
+	memcpy(bpage->page, buffer->buffers[cpu]->reader_page->page,
+			PAGE_SIZE);
+
+	cpu_buffer->reader_page = bpage;
+
+	pages_list = vmalloc(sizeof(struct page *) * 2);
+	/* new two pages */
+	list_add(&pages_l, &buffer->buffers[cpu]->head_page->list);
+	list_for_each_entry(p, &pages_l, list) {
+		start += ALIGN(sizeof(*p), cache_line_size());
+		bpage = start;
+		memcpy(bpage, p, sizeof(*p));
+
+		page = alloc_pages_node(cpu_to_node(cpu),
+				GFP_KERNEL, 0);
+
+		if (!page)
+			goto free_pages;
+		/* invalidate the page */
+		memset(page_address(page), 0, PAGE_SIZE);
+		dmac_flush_range(page_address(page),
+				page_address(page) + PAGE_SIZE);
+		outer_flush_range(__pa(page_address(page)),
+				__pa(page_address(page))
+				+ PAGE_SIZE);
+		bpage->cached_page = page_address(page);
+		bpage->page = page_address(page);
+		pages_list[nr_pages++] = page;
+
+		memcpy(bpage->page, p->page, PAGE_SIZE);
+		list_add(&bpage->list, &pages);
+	}
+	list_del_init(&pages_l);
+
+	/* change to non-cached */
+	start = vmap(pages_list, nr_pages, 0, pgprot_noncached(pgprot_kernel));
+	if (!start) {
+		printk(KERN_WARNING
+				"switch_cpu_buffer: vmap fialure\n");
+		vfree(pages_list);
+		goto free_pages;
+	}
+	list_for_each_entry_reverse(tmp, &pages, list) {
+		tmp->page = start;
+		start += PAGE_SIZE;
+	}
+	vfree(pages_list);
+
+	/* init the new struct cpu_buffer */
+	cpu_buffer->pages = pages.next;
+	list_del_init(&pages);
+
+	cpu_buffer->head_page =
+		 list_entry(cpu_buffer->pages,
+				 struct buffer_page, list);
+	cpu_buffer->tail_page = cpu_buffer->commit_page =
+		cpu_buffer->head_page;
+	rb_head_page_activate(cpu_buffer);
+
+	rb_free_cpu_buffer(buffer->buffers[cpu]);
+
+	return cpu_buffer;
+
+ free_pages:
+	non_cache_set = 1;
+	free_buffer_page(cpu_buffer->reader_page);
+	list_for_each_entry_safe(bpage, tmp, &pages, list) {
+		list_del_init(&bpage->list);
+		free_buffer_page(bpage);
+	}
+ fail_free_struct:
+	vunmap(start_struct);
+ fail_free_struct_page:
+	free_page((unsigned int)page_address(page_s));
+
+	return NULL;
+}
+
+/*
+ * MARVELL:this function is used to change cached to noncached
+ * before trace is working
+ */
+static int change_ring_buffer_struct(struct ring_buffer *buffer)
+{
+	int cpu;
+	void *tmp;
+
+	for_each_buffer_cpu(buffer, cpu) {
+		tmp = rb_switch_cpu_buffer(buffer, cpu);
+		if (!tmp) {
+			WARN(1, "failed to swtich ring buffer on CPU %d\n",
+			     cpu);
+			return -ENOMEM;
+		}
+		buffer->buffers[cpu] = tmp;
+	}
+
+	non_cache_set = 1;
+	return 0;
+}
+
 static void
 rb_remove_pages(struct ring_buffer_per_cpu *cpu_buffer, unsigned nr_pages)
 {
@@ -1292,8 +1493,11 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size)
 	struct buffer_page *bpage, *tmp;
 	unsigned long buffer_size;
 	LIST_HEAD(pages);
-	int i, cpu;
-
+	int i = 0, cpu, ret;
+	struct page *page;
+	struct page **pages_list = NULL;
+	struct page **struct_list = NULL;
+	void *start = NULL, *struct_start = NULL;
 	/*
 	 * Always succeed at resizing a non-existent buffer:
 	 */
@@ -1318,6 +1522,28 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size)
 
 	mutex_lock(&buffer->mutex);
 	get_online_cpus();
+
+	/*
+	 * non_cached_set value meaning:
+	 * 1: indicate buffer noncached and trace is working
+	 * 2: indicate buffer cached and trace is working
+	 * 0: indicate trace is not working, we can switch
+	 *
+	 * we only can change to non-cachedable once, and
+	 * it is irreversible.
+	 */
+	if (non_cache_set != 1) {
+		non_cache_set = 2;
+		if (enable_change_trace_buffer) {
+			ret = change_ring_buffer_struct(buffer);
+			if (ret < 0) {
+				printk(KERN_WARNING
+						"trace:resize:switch to non_cached fail\n");
+				non_cache_set = 2;
+				enable_change_trace_buffer = 0;
+			}
+		}
+	}
 
 	nr_pages = DIV_ROUND_UP(size, BUF_PAGE_SIZE);
 
@@ -1348,31 +1574,164 @@ int ring_buffer_resize(struct ring_buffer *buffer, unsigned long size)
 		goto out_fail;
 
 	new_pages = nr_pages - buffer->pages;
+	/*
+	 * Non cached trace: need to set non-cached struct and buffer.
+	 */
+	if (non_cache_set == 1) {
+		unsigned vm_times = 0;
+		unsigned long size_struct, struct_phy;
+		int nr, nr_struct;
+
+		/*
+		 * For buffer:
+		 * Count the numbers of struct page needed to allocate.
+		 */
+		for_each_buffer_cpu(buffer, cpu)
+				vm_times++;
+		nr = new_pages * vm_times;
+		pages_list = vmalloc(sizeof(struct page *) * nr);
+		if (!pages_list)
+			return -ENOMEM;
+
+		/*
+		 * For struct:
+		 * Count the numbers of struct page, allocate pages,
+		 * vmap to non-cached.
+		 */
+		size_struct = new_pages * ALIGN(sizeof(*bpage),
+				cache_line_size());
+		size_struct = PAGE_ALIGN(size_struct);
+		size_struct *= vm_times;
+		nr_struct = size_struct >> PAGE_SHIFT;
+		struct_start = alloc_pages_exact(size_struct,
+				GFP_KERNEL | __GFP_NORETRY);
+
+		if (!struct_start) {
+			vfree(pages_list);
+			return -ENOMEM;
+		}
+
+		struct_phy = virt_to_phys(struct_start);
+		memset(struct_start, 0x0, size_struct);
+		/* invalidate the buffer before vmap as noncacheable */
+		dmac_flush_range(struct_start, struct_start + size_struct);
+		outer_flush_range(struct_phy, struct_phy + size_struct);
+
+		struct_list = vmalloc(sizeof(struct page *) * nr_struct);
+		if (!struct_list) {
+			free_pages_exact(struct_start, size_struct);
+			return -ENOMEM;
+		}
+
+		while (i < nr_struct) {
+			struct_list[i] = phys_to_page(struct_phy +
+					(i << PAGE_SHIFT));
+			i++;
+		}
+
+		start = vmap(struct_list, nr_struct,
+				0, pgprot_noncached(pgprot_kernel));
+		if (!start) {
+			printk(KERN_WARNING
+					"trace: vmap failure, please set a"
+					"smaller size < 50000\n");
+			vfree(struct_list);
+			free_pages_exact(struct_start, size_struct);
+			vfree(pages_list);
+			return -ENOMEM;
+		}
+		vfree(struct_list);
+	}
 
 	for_each_buffer_cpu(buffer, cpu) {
+		if (non_cache_set == 1) {
+			start = (void *)PAGE_ALIGN((unsigned long)start);
+			struct_start = (void *) \
+				PAGE_ALIGN((unsigned long)struct_start);
+		}
 		for (i = 0; i < new_pages; i++) {
-			struct page *page;
 			/*
-			 * __GFP_NORETRY flag makes sure that the allocation
-			 * fails gracefully without invoking oom-killer and
-			 * the system is not destabilized.
+			 * Handle struct allocation
 			 */
-			bpage = kzalloc_node(ALIGN(sizeof(*bpage),
-						  cache_line_size()),
-					    GFP_KERNEL | __GFP_NORETRY,
-					    cpu_to_node(cpu));
+			if (non_cache_set == 1) {
+				/*
+				 * Put every buffer_page on
+				 * non-cached pages.
+				 */
+				bpage = start;
+				start += ALIGN(sizeof(*bpage),
+						cache_line_size());
+				/*
+				 * Save the page address for free
+				 */
+				if (!((unsigned long)struct_start % PAGE_SIZE))
+					bpage->struct_page = struct_start;
+				struct_start += ALIGN(sizeof(*bpage),
+						cache_line_size());
+			} else
+				/*
+				 * __GFP_NORETRY flag makes sure that the
+				 * allocation fails gracefully without
+				 * invoking oom-killer and the system is
+				 * not destabilized.
+				 */
+				bpage = kzalloc_node(ALIGN(sizeof(*bpage),
+							cache_line_size()),
+						GFP_KERNEL | __GFP_NORETRY,
+						cpu_to_node(cpu));
+
 			if (!bpage)
 				goto free_pages;
 			list_add(&bpage->list, &pages);
 			page = alloc_pages_node(cpu_to_node(cpu),
 						GFP_KERNEL | __GFP_NORETRY, 0);
+
 			if (!page)
 				goto free_pages;
+
+			/*
+			 * Add all buffer pages into pages_list
+			 * in order to be non-cached by vmap.
+			 */
+			bpage->cached_page = page_address(page);
+			if (non_cache_set == 1) {
+				/*
+				 * For non-cached purpose, invalidate page
+				 * and update pages_list.
+				 */
+				memset(page_address(page), 0, PAGE_SIZE);
+				dmac_flush_range(page_address(page),
+						page_address(page) + PAGE_SIZE);
+				outer_flush_range(__pa(page_address(page)),
+						__pa(page_address(page))
+						+ PAGE_SIZE);
+				pages_list[i + cpu*new_pages] = page;
+			}
 			bpage->page = page_address(page);
 			rb_init_page(bpage->page);
 		}
 	}
 
+	/*
+	 * vmap all buffer pages and update the value of "page"
+	 * in struct "buffer_page".
+	 */
+	if (non_cache_set == 1) {
+		start = vmap(pages_list, new_pages*cpu,
+				0, pgprot_noncached(pgprot_kernel));
+		if (!start) {
+			printk(KERN_WARNING
+					"trace: vmap failure, please set a "
+					"smaller size < 50000!\n");
+			vfree(pages_list);
+			goto free_pages;
+		}
+		list_for_each_entry_reverse(tmp, &pages, list) {
+			tmp->page = start;
+			start += PAGE_SIZE;
+		}
+		vfree(pages_list);
+	}
 	for_each_buffer_cpu(buffer, cpu) {
 		cpu_buffer = buffer->buffers[cpu];
 		rb_insert_pages(cpu_buffer, &pages, new_pages);
@@ -3846,11 +4205,23 @@ void *ring_buffer_alloc_read_page(struct ring_buffer *buffer, int cpu)
 	if (!page)
 		return NULL;
 
-	bpage = page_address(page);
+	if (non_cache_set == 1) {
+		bpage = remap_noncached_page(page);
+		if (!bpage) {
+			printk(KERN_WARNING
+					"trace:allocate read page fail.\n");
+			goto free_pages;
+		}
+	} else
+		bpage = page_address(page);
 
 	rb_init_page(bpage);
 
 	return bpage;
+
+ free_pages:
+	free_page((unsigned long)page_address(page));
+	return NULL;
 }
 EXPORT_SYMBOL_GPL(ring_buffer_alloc_read_page);
 

@@ -9,10 +9,15 @@
  */
 #include <linux/module.h>
 #include <linux/kernel.h>
+#include <linux/gpio-pxa.h>
 #include <linux/init.h>
 #include <linux/list.h>
 #include <linux/io.h>
 #include <linux/platform_device.h>
+#include <linux/delay.h>
+#include <linux/dma-mapping.h>
+#include <linux/platform_data/mmp_audio.h>
+#include <linux/mfd/ds1wm.h>
 
 #include <asm/mach/time.h>
 #include <mach/addr-map.h>
@@ -23,11 +28,14 @@
 #include <mach/dma.h>
 #include <mach/mfp.h>
 #include <mach/devices.h>
+#include <mach/pm-pxa910.h>
 
 #include "common.h"
 #include "clock.h"
 
 #define MFPR_VIRT_BASE	(APB_VIRT_BASE + 0x1e000)
+unsigned char __iomem *dmc_membase;
+EXPORT_SYMBOL(dmc_membase);
 
 static struct mfp_addr_map pxa910_mfp_addr_map[] __initdata =
 {
@@ -82,6 +90,70 @@ void __init pxa910_init_irq(void)
 	icu_init_irq();
 }
 
+/* gssp clk ops: gssp is shared between AP and CP */
+static void gssp_clk_enable(struct clk *clk)
+{
+	unsigned int gcer;
+	/* GPB bus select: choose APB */
+	__raw_writel(0x1, APBC_PXA910_GBS);
+	/* GSSP clock control register: GCER */
+	gcer = __raw_readl(clk->clk_rst) & ~(0x3 << 8);
+	/* choose I2S clock */
+	gcer |= APBC_FNCLK | (0x0 << 8);
+	__raw_writel(gcer, clk->clk_rst);
+	udelay(10);
+	gcer |= APBC_APBCLK;
+	__raw_writel(gcer, clk->clk_rst);
+	udelay(10);
+	gcer &= ~APBC_RST;
+	__raw_writel(gcer, clk->clk_rst);
+	pr_debug("gssp clk is open\n");
+}
+
+static void gssp_clk_disable(struct clk *clk)
+{
+	unsigned int gcer;
+	gcer = __raw_readl(clk->clk_rst);
+	gcer &= ~APBC_APBCLK;
+	__raw_writel(gcer, clk->clk_rst);
+	__raw_writel(0x0, APBC_PXA910_GBS);
+	pr_debug("gssp clk is closed\n");
+}
+
+struct clkops gssp_clk_ops = {
+	.enable = gssp_clk_enable,
+	.disable = gssp_clk_disable,
+};
+
+static void lcd_clk_enable(struct clk *clk)
+{
+	__raw_writel(clk->enable_val, clk->clk_rst);
+}
+static void lcd_clk_disable(struct clk *clk)
+{
+	u32 tmp = __raw_readl(clk->clk_rst);
+	tmp &= ~0x38;	/* release from reset to keep register setting */
+	__raw_writel(tmp, clk->clk_rst);
+}
+
+static int lcd_clk_setrate(struct clk *clk, unsigned long val)
+{
+	__raw_writel(val, clk->clk_rst);
+	return 0;
+}
+static unsigned long lcd_clk_getrate(struct clk *clk)
+{
+	unsigned long rate = clk->rate;
+	return rate;
+}
+
+struct clkops lcd_pn1_clk_ops = {
+	.enable		= lcd_clk_enable,
+	.disable	= lcd_clk_disable,
+	.setrate	= lcd_clk_setrate,
+	.getrate	= lcd_clk_getrate,
+};
+
 /* APB peripheral clocks */
 static APBC_CLK(uart1, PXA910_UART0, 1, 14745600);
 static APBC_CLK(uart2, PXA910_UART1, 1, 14745600);
@@ -93,9 +165,24 @@ static APBC_CLK(pwm3, PXA910_PWM3, 1, 13000000);
 static APBC_CLK(pwm4, PXA910_PWM4, 1, 13000000);
 static APBC_CLK(gpio, PXA910_GPIO, 0, 13000000);
 static APBC_CLK(rtc, PXA910_RTC, 8, 32768);
+static APBC_CLK(ssp1, PXA910_SSP1, 4, 3250000);
+static APBC_CLK(ssp2, PXA910_SSP2, 0, 0);
+static APBC_CLK(1wire,  PXA910_ONEWIRE,  0, 26000000);
+static APBC_CLK_OPS(gssp, PXA910_GCER, 0, 0, &gssp_clk_ops);
 
 static APMU_CLK(nand, NAND, 0x19b, 156000000);
-static APMU_CLK(u2o, USB, 0x1b, 480000000);
+static APMU_CLK(u2o, USB, 0x9, 480000000);
+static APMU_CLK(u2h, USB, 0x012, 480000000);
+static APMU_CLK_OPS(lcd, LCD, 0x003f, 312000000, &lcd_pn1_clk_ops);
+static APMU_CLK(ccic_rst, CCIC_RST, 0x0, 312000000);
+static APMU_CLK(ccic_gate, CCIC_GATE, 0xfff, 0);
+static APMU_CLK(sdh0, SDH0, 0x001b, 44500000);
+static APMU_CLK(sdh1, SDH1, 0x001b, 44500000);
+/* Configure the clock as 52MHz since eMMC is used on SDH2 at pxa920
+ * board. If SD 2.0 card is used on SDH2, according to SD 2.0 spec,
+ * the max clock is limited to 50MHz, so this patch cannot be applied.
+ */
+static APMU_CLK(sdh2, SDH2, 0x005b, 52000000);
 
 /* device and clock bindings */
 static struct clk_lookup pxa910_clkregs[] = {
@@ -109,8 +196,18 @@ static struct clk_lookup pxa910_clkregs[] = {
 	INIT_CLKREG(&clk_pwm4, "pxa910-pwm.3", NULL),
 	INIT_CLKREG(&clk_nand, "pxa3xx-nand", NULL),
 	INIT_CLKREG(&clk_gpio, "pxa-gpio", NULL),
-	INIT_CLKREG(&clk_u2o, "pxa-u2o", "U2OCLK"),
+	INIT_CLKREG(&clk_1wire, NULL, "PXA-W1"),
+	INIT_CLKREG(&clk_u2o, NULL, "U2OCLK"),
 	INIT_CLKREG(&clk_rtc, "sa1100-rtc", NULL),
+	INIT_CLKREG(&clk_ssp1, "pxa910-ssp.0", NULL),
+	INIT_CLKREG(&clk_ssp2, "pxa910-ssp.1", NULL),
+	INIT_CLKREG(&clk_gssp, "pxa910-ssp.4", NULL),
+	INIT_CLKREG(&clk_lcd, NULL, "LCDCLK"),
+	INIT_CLKREG(&clk_ccic_rst, "mmp-camera.0", "CCICRSTCLK"),
+	INIT_CLKREG(&clk_ccic_gate, "mmp-camera.0", "CCICGATECLK"),
+	INIT_CLKREG(&clk_sdh0, "sdhci-pxav2.0", "PXA-SDHCLK"),
+	INIT_CLKREG(&clk_sdh1, "sdhci-pxav2.1", "PXA-SDHCLK"),
+	INIT_CLKREG(&clk_sdh2, "sdhci-pxav2.2", "PXA-SDHCLK"),
 };
 
 static int __init pxa910_init(void)
@@ -122,6 +219,7 @@ static int __init pxa910_init(void)
 		clkdev_add_table(ARRAY_AND_SIZE(pxa910_clkregs));
 	}
 
+	dmc_membase = ioremap(0xb0000000, 0x00001000);
 	return 0;
 }
 postcore_initcall(pxa910_init);
@@ -166,6 +264,18 @@ PXA910_DEVICE(pwm2, "pxa910-pwm", 1, NONE, 0xd401a400, 0x10);
 PXA910_DEVICE(pwm3, "pxa910-pwm", 2, NONE, 0xd401a800, 0x10);
 PXA910_DEVICE(pwm4, "pxa910-pwm", 3, NONE, 0xd401ac00, 0x10);
 PXA910_DEVICE(nand, "pxa3xx-nand", -1, NAND, 0xd4283000, 0x80, 97, 99);
+PXA910_DEVICE(cnm, "pxa-cnm", -1, CNM, 0xd420d000, 0x1000);
+PXA910_DEVICE(asram, "asram", 0, NONE, 0xd100a000, 0x15000);
+PXA910_DEVICE(ssp0, "pxa910-ssp", 0, SSP1, 0xd401b000, 0x90, 52, 53);
+PXA910_DEVICE(ssp1, "pxa910-ssp", 1, SSP2, 0xd42a0c00, 0x90, 1, 2);
+PXA910_DEVICE(ssp2, "pxa910-ssp", 2, SSP3, 0xd401C000, 0x90, 60, 61);
+PXA910_DEVICE(gssp, "pxa910-ssp", 4, GSSP, 0xd4039000, 0x90, 6, 7);
+PXA910_DEVICE(fb, "pxa168-fb", 0, LCD, 0xd420b000, 0x1ec);
+PXA910_DEVICE(fb_ovly, "pxa168fb_ovly", 0, LCD, 0xd420b000, 0x1ec);
+PXA910_DEVICE(camera, "mmp-camera", 0, CCIC, 0xd420a000, 0xfff);
+PXA910_DEVICE(sdh0, "sdhci-pxav2", 0, MMC, 0xd4280000, 0x120);
+PXA910_DEVICE(sdh1, "sdhci-pxav2", 1, MMC, 0xd4280800, 0x120);
+PXA910_DEVICE(sdh2, "sdhci-pxav2", 2, MMC, 0xd4281000, 0x120);
 
 struct resource pxa910_resource_gpio[] = {
 	{
@@ -180,11 +290,18 @@ struct resource pxa910_resource_gpio[] = {
 	},
 };
 
+static struct pxa_gpio_platform_data pxa910_gpio_info __initdata = {
+	.gpio_set_wake = pxa910_set_wake,
+};
+
 struct platform_device pxa910_device_gpio = {
 	.name		= "pxa-gpio",
 	.id		= -1,
 	.num_resources	= ARRAY_SIZE(pxa910_resource_gpio),
 	.resource	= pxa910_resource_gpio,
+	.dev            = {
+		.platform_data  = &pxa910_gpio_info,
+	},
 };
 
 static struct resource pxa910_resource_rtc[] = {
@@ -210,4 +327,71 @@ struct platform_device pxa910_device_rtc = {
 	.id		= -1,
 	.num_resources	= ARRAY_SIZE(pxa910_resource_rtc),
 	.resource	= pxa910_resource_rtc,
+};
+
+static struct resource pxa910_resource_squ[] = {
+	{
+		.start	= 0xd42a0800,
+		.end	= 0xd42a08ff,
+		.flags	= IORESOURCE_MEM,
+	}, {
+		.start	= IRQ_PXA910_HIFI_DMA,
+		.end	= IRQ_PXA910_HIFI_DMA,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
+
+struct platform_device pxa910_device_squ = {
+	.name		= "pxa910-squ",
+	.id		= 1,
+	.num_resources	= ARRAY_SIZE(pxa910_resource_squ),
+	.resource	= pxa910_resource_squ,
+	.dev		= {
+		.coherent_dma_mask = DMA_BIT_MASK(64),
+	},
+};
+
+static struct resource pxa910_resource_pcm_audio[] = {
+	 {
+		 /* playback dma */
+		.name	= "pxa910-squ",
+		.start	= 0,
+		.flags	= IORESOURCE_DMA,
+	},
+	 {
+		 /* record dma */
+		.name	= "pxa910-squ",
+		.start	= 1,
+		.flags	= IORESOURCE_DMA,
+	},
+};
+
+static struct mmp_audio_platdata mmp_audio_pdata = {
+	.period_max_capture = 4 * 1024,
+	.buffer_max_capture = 20 * 1024,
+	.period_max_playback = 4 * 1024,
+	.buffer_max_playback = 56 * 1024,
+};
+
+struct platform_device pxa910_device_asoc_platform = {
+	.name		= "mmp-pcm-audio",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(pxa910_resource_pcm_audio),
+	.resource	= pxa910_resource_pcm_audio,
+	.dev = {
+		.platform_data  = &mmp_audio_pdata,
+	},
+};
+
+static struct resource pxa910_resource_1wire[] = {
+	{ 0xd4011800, 0xd4011814, NULL, IORESOURCE_MEM, },
+	{ IRQ_PXA910_ONEWIRE, IRQ_PXA910_ONEWIRE, NULL,	\
+	IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE, },
+};
+
+struct platform_device pxa910_device_1wire = {
+	.name		= "pxa-w1",
+	.id		= -1,
+	.num_resources	= ARRAY_SIZE(pxa910_resource_1wire),
+	.resource	= pxa910_resource_1wire,
 };

@@ -11,7 +11,7 @@
 #define __MACH_SRAM_H
 
 /* ARBITRARY:  SRAM allocations are multiples of this 2^N size */
-#define SRAM_GRANULARITY	512
+#define SRAM_GRANULARITY	128
 
 /*
  * SRAM allocations return a CPU virtual address, or NULL on error.

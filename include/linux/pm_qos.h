@@ -15,8 +15,24 @@ enum {
 	PM_QOS_CPU_DMA_LATENCY,
 	PM_QOS_NETWORK_LATENCY,
 	PM_QOS_NETWORK_THROUGHPUT,
-
+	PM_QOS_CPUIDLE_BLOCK,
 	/* insert new class ID */
+#ifdef CONFIG_DDR_DEVFREQ
+	PM_QOS_DDR_DEVFREQ_MIN,
+	PM_QOS_DDR_DEVFREQ_MAX,
+#endif
+#ifdef CONFIG_MCK5_ACTIVITY_MONITOR
+	PM_QOS_DDR_ACT_MIN,
+#endif
+	PM_QOS_AXI_MIN,
+	PM_QOS_CPUFREQ_MIN,
+	PM_QOS_CPUFREQ_MAX,
+	PM_QOS_GPUFREQ_3D_MIN,
+	PM_QOS_GPUFREQ_2D_MIN,
+	PM_QOS_GPUFREQ_SH_MIN,
+	PM_QOS_GPUFREQ_3D_MAX,
+	PM_QOS_GPUFREQ_2D_MAX,
+	PM_QOS_GPUFREQ_SH_MAX,
 	PM_QOS_NUM_CLASSES,
 };
 
@@ -26,10 +42,15 @@ enum {
 #define PM_QOS_NETWORK_LAT_DEFAULT_VALUE	(2000 * USEC_PER_SEC)
 #define PM_QOS_NETWORK_THROUGHPUT_DEFAULT_VALUE	0
 #define PM_QOS_DEV_LAT_DEFAULT_VALUE		0
+#define PM_QOS_CPUIDLE_BLOCK_DEFAULT_VALUE	0
+#define PM_QOS_CPUIDLE_BLOCK_VCTCXO_VALUE	1
+#define PM_QOS_CPUIDLE_BLOCK_DDR_VALUE		2
+#define PM_QOS_CPUIDLE_BLOCK_AXI_VALUE		3
 
 struct pm_qos_request {
 	struct plist_node node;
 	int pm_qos_class;
+	const char *name;
 	struct delayed_work work; /* for pm_qos_update_request_timeout */
 };
 
@@ -63,6 +84,21 @@ enum pm_qos_req_action {
 	PM_QOS_UPDATE_REQ,	/* Update an existing request */
 	PM_QOS_REMOVE_REQ	/* Remove an existing request */
 };
+
+/*
+ * locking rule: all changes to constraints or notifiers lists
+ * or pm_qos_object list and pm_qos_objects need to happen with pm_qos_lock
+ * held, taken with _irqsave.  One lock to rule them all
+ */
+struct pm_qos_object {
+	struct pm_qos_constraints *constraints;
+	struct miscdevice pm_qos_power_miscdev;
+	char *name;
+};
+
+/* Declare qos_array in case other drivers may access it */
+extern spinlock_t pm_qos_lock;
+extern struct pm_qos_object *pm_qos_array[];
 
 static inline int dev_pm_qos_request_active(struct dev_pm_qos_request *req)
 {
