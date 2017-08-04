@@ -24,7 +24,6 @@
 #define _SS_AVTAB_H_
 
 #include "security.h"
-#include <linux/flex_array.h>
 
 struct avtab_key {
 	u16 source_type;	/* source type */
