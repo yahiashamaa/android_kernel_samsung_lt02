@@ -1,2 +1,2 @@
 geu-objs := pxa-geu.o
-obj-m += geu.o
+obj-$(CONFIG_MARVELL_SECURITY_GEU) += geu.o

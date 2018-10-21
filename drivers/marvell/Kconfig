@@ -12,28 +12,28 @@ config MRVL_SD8XXX
 
 
 config MRVL_GPU_GALCORE
-        tristate "Marvell Graphics Kernel Mode Driver"
-        default n
-        help
-                If you say Y here, graphics kernel mode driver named galcore
-                will be built into uImage.
+	tristate "Marvell Graphics Kernel Mode Driver"
+	default n
+	help
+		If you say Y here, graphics kernel mode driver named galcore
+		will be built into uImage.
 
-                To compile this driver as a module, choose M here: the driver
-                will be compiled into a separate module galcore.ko.
+		To compile this driver as a module, choose M here: the driver
+		will be compiled into a separate module galcore.ko.
 
-                If you want to disable GPU hardware totally, just select N here.
+		If you want to disable GPU hardware totally, just select N here.
 
 config MRVL_MMP_MODEM
-       tristate "Marvell mmp modem driver"
-       default n
-       help
-               marvell mmp modem driver for communication processor
+	tristate "Marvell mmp modem driver"
+	default n
+	help
+		marvell mmp modem driver for communication processor
 
 config MRVL_GEU
-       tristate "Marvell driver for generic encrypt unit"
-       default n
-       help
-               driver for generic encrypt unit
+	tristate "Marvell driver for generic encrypt unit"
+	default n
+	help
+		driver for generic encrypt unit
 
 config GRAPHICS_PXA1920
 	tristate "enable graphics for pxa1920"
@@ -48,9 +48,13 @@ config GRAPHICS_PXA1088
 		for chipset pxa1088
 
 config MRVL_TZDD
-       tristate "Marvell Trust Zone Device Driver"
-       default n
-       help
-               Marvell Trust Execution Environment (TEE) Solution in non-trusted world
+	tristate "Marvell Trust Zone Device Driver"
+	default n
+	help
+		Marvell Trust Execution Environment (TEE) Solution in non-trusted world
+
+source "drivers/marvell/sd8787/Kconfig"
+
+source "drivers/marvell/security/Kconfig"
 
 endif

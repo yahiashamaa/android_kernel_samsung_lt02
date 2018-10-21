@@ -1,0 +1,10 @@
+menuconfig MARVELL_SECURITY
+	tristate "Marvell Security"
+	default n
+
+config MARVELL_SECURITY_GEU
+	tristate "Marvell pxa-geu Driver"
+	depends on MARVELL_SECURITY
+	default n
+	---help---
+	  pxa-geu driver for generic encrypt unit.

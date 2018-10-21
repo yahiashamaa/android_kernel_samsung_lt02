@@ -317,11 +317,7 @@ ifneq ($(srctree),)
 EXTRA_CFLAGS += -I$(srctree)/drivers/staging/android/ion
 endif
 
-ifeq ($(CONFIG_MRVL_GPU_GALCORE),)
-obj-m = galcore.o
-else
 obj-${CONFIG_MRVL_GPU_GALCORE} = galcore.o
-endif
 
 galcore-objs  = $(OBJS)
 

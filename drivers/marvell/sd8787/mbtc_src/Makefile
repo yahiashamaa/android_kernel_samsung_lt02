@@ -106,7 +106,7 @@ BTOBJS = bt/bt_main.o bt/bt_sdiommc.o bt/bt_proc.o bt/mbt_char.o
 
 BTOBJS += bt/bt_init.o
 
-obj-m := mbt8xxx.o
+obj-$(CONFIG_MRVL_SD8XXX_BT) := mbt8xxx.o
 mbt8xxx-objs := $(BTOBJS)
 
 

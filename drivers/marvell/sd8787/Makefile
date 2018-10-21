@@ -2,5 +2,5 @@
 # Makefile for sd8xxx
 #
 
-obj-m		+= wlan_src/
-obj-m		+= mbtc_src/
+obj-$(CONFIG_MRVL_SD8XXX_WIFI)		+= wlan_src/
+obj-$(CONFIG_MRVL_SD8XXX_BT)		+= mbtc_src/
