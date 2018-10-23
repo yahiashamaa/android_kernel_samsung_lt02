@@ -453,10 +453,7 @@ int objio_read_pagelist(struct nfs_read_data *rdata)
 	objios->ios->done = _read_done;
 	dprintk("%s: offset=0x%llx length=0x%x\n", __func__,
 		rdata->args.offset, rdata->args.count);
-	ret = ore_read(objios->ios);
-	if (unlikely(ret))
-		objio_free_result(&objios->oir);
-	return ret;
+	return ore_read(objios->ios);
 }
 
 /*
@@ -540,10 +537,8 @@ int objio_write_pagelist(struct nfs_write_data *wdata, int how)
 	dprintk("%s: offset=0x%llx length=0x%x\n", __func__,
 		wdata->args.offset, wdata->args.count);
 	ret = ore_write(objios->ios);
-	if (unlikely(ret)) {
-		objio_free_result(&objios->oir);
+	if (unlikely(ret))
 		return ret;
-	}
 
 	if (objios->sync)
 		_write_done(objios->ios, objios);

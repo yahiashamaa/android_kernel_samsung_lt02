@@ -735,7 +735,13 @@ static int _prepare_for_striping(struct ore_io_state *ios)
 out:
 	ios->numdevs = devs_in_group;
 	ios->pages_consumed = cur_pg;
-	return ret;
+	if (unlikely(ret)) {
+		if (length == ios->length)
+			return ret;
+		else
+			ios->length -= length;
+	}
+	return 0;
 }
 
 int ore_create(struct ore_io_state *ios)
