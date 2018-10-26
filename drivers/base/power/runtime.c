@@ -196,9 +196,6 @@ static int rpm_idle(struct device *dev, int rpmflags)
 {
 	int (*callback)(struct device *);
 	int retval;
-	
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("galcore rt suspend 1\n");
 
 	trace_rpm_idle(dev, rpmflags);
 	retval = rpm_check_suspend_allowed(dev);
@@ -358,8 +355,6 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 
 	/* Other scheduled or pending requests need to be canceled. */
 	pm_runtime_cancel_pending(dev);
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("galcore rt suspend 2\n");
 
 	if (dev->power.runtime_status == RPM_SUSPENDING) {
 		DEFINE_WAIT(wait);
@@ -424,18 +419,10 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 
 	if (!callback && dev->driver && dev->driver->pm)
 		callback = dev->driver->pm->runtime_suspend;
-	
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("galcore rt suspend 3\n");
 
 	retval = rpm_callback(callback, dev);
-	
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("galcore rt suspend 4 ret=0x%x\n", retval);
 	if (retval)
 		goto fail;
-	
-	
 
  no_callback:
 	__update_runtime_status(dev, RPM_SUSPENDED);
@@ -466,15 +453,11 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 	}
 
  out:
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("galcore rt suspend 5,ret=0x%x\n", retval);
 	trace_rpm_return_int(dev, _THIS_IP_, retval);
 
 	return retval;
 
  fail:
-
-
 	__update_runtime_status(dev, RPM_ACTIVE);
 	dev->power.deferred_resume = false;
 	wake_up_all(&dev->power.wait_queue);
@@ -527,7 +510,7 @@ static int rpm_resume(struct device *dev, int rpmflags)
 	if (dev->power.runtime_error)
 		retval = -EINVAL;
 	else if (dev->power.disable_depth == 1 && dev->power.is_suspended
-	    && dev->power.runtime_status == RPM_ACTIVE)
+			 && dev->power.runtime_status == RPM_ACTIVE)
 		retval = 1;
 	else if (dev->power.disable_depth > 0)
 		retval = -EACCES;
@@ -1155,24 +1138,15 @@ EXPORT_SYMBOL_GPL(pm_runtime_forbid);
  */
 void pm_runtime_allow(struct device *dev)
 {
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("%s rt pre-acquired dev_pwr_lock\n", dev_name(dev));
 	spin_lock_irq(&dev->power.lock);
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("%s rt post-acquired dev_pwr_lock, status %d\n", dev_name(dev), dev->power.runtime_status);
-	if (dev->power.runtime_auto) {
-		if (!strcmp("galcore", dev_name(dev)))
-			printk("gc rt suspend 0\n");
+	if (dev->power.runtime_auto)
 		goto out;
-	}
 
 	dev->power.runtime_auto = true;
 	if (atomic_dec_and_test(&dev->power.usage_count))
 		rpm_idle(dev, RPM_AUTO);
 
  out:
-	if (!strcmp("galcore", dev_name(dev)))
-		printk("%s rt suspend end, status %d\n",dev_name(dev), dev->power.runtime_status);
 	spin_unlock_irq(&dev->power.lock);
 }
 EXPORT_SYMBOL_GPL(pm_runtime_allow);

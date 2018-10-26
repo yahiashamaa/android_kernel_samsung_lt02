@@ -796,20 +796,6 @@ static int printk_cpu_id = 0;
 #endif
 module_param_named(cpu, printk_cpu_id, bool, S_IRUGO | S_IWUSR);
 
-#if defined(CONFIG_PRINTK_PID)
-static int printk_pid = 1;
-#else
-static int printk_pid = 0;
-#endif
-module_param_named(pid, printk_pid, bool, S_IRUGO | S_IWUSR);
-
-#if defined(CONFIG_PRINTK_COMM)
-static int printk_comm = 1;
-#else
-static int printk_comm = 0;
-#endif
-module_param_named(comm, printk_comm, bool, S_IRUGO | S_IWUSR);
-
 /* Check if we have any console registered that can be called early in boot. */
 static int have_callable_console(void)
 {
@@ -985,8 +971,7 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 				  sizeof(printk_buf) - printed_len, fmt, args);
 
 #ifdef	CONFIG_DEBUG_LL
-	if (console_drivers == NULL)
-		printascii(printk_buf);
+	printascii(printk_buf);
 #endif
 
 	p = printk_buf;
@@ -1057,28 +1042,6 @@ asmlinkage int vprintk(const char *fmt, va_list args)
 				unsigned tlen;
 
 				tlen = sprintf(tbuf, "c%u ", printk_cpu);
-
-				for (tp = tbuf; tp < tbuf + tlen; tp++)
-					emit_log_char(*tp);
-				printed_len += tlen;
-			}
-			if (printk_pid) {
-				/* Add the current process id */
-				char tbuf[10], *tp;
-				unsigned tlen;
-
-				tlen = sprintf(tbuf, "%6u ", current->pid);
-
-				for (tp = tbuf; tp < tbuf + tlen; tp++)
-					emit_log_char(*tp);
-				printed_len += tlen;
-			}
-			if (printk_comm) {
-				/* Add the current process comm */
-				char tbuf[20]={0,}, *tp;
-				unsigned tlen;
-
-				tlen = snprintf(tbuf, sizeof(tbuf), "%s ", current->comm);
 
 				for (tp = tbuf; tp < tbuf + tlen; tp++)
 					emit_log_char(*tp);

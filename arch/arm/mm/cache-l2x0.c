@@ -442,6 +442,7 @@ void __init l2x0_init(void __iomem *base, u32 aux_val, u32 aux_mask)
 		/* enable L2X0 */
 		writel_relaxed(1, l2x0_base + L2X0_CTRL);
 	}
+
 	/*
 	 * l2x0 controller is enabled at this time
 	 */
