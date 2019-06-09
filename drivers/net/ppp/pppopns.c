@@ -204,6 +204,22 @@ static int pppopns_recv_core(struct sock *sk_raw, struct sk_buff *skb)
 		}
 		traverse_receive_queue(sk);
 		spin_unlock(&pppox_sk(sk)->recv_queue_lock);
+
+		/* Remove packets from receive queue as long as
+		 * 1. the receive buffer is full,
+		 * 2. they are queued longer than one second, or
+		 * 3. there are no missing packets before them. */
+		skb_queue_walk_safe(&sk->sk_receive_queue, skb, skb1) {
+			meta = skb_meta(skb);
+			if (atomic_read(&sk->sk_rmem_alloc) < sk->sk_rcvbuf &&
+					now - meta->timestamp < HZ &&
+					meta->sequence != opt->recv_sequence)
+				break;
+			skb_unlink(skb, &sk->sk_receive_queue);
+			opt->recv_sequence = meta->sequence + 1;
+			skb_orphan(skb);
+			ppp_input(&pppox_sk(sk)->chan, skb);
+		}
 		return NET_RX_SUCCESS;
 	}
 

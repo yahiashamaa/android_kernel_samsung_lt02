@@ -141,11 +141,7 @@ static struct usb_request *adb_request_new(struct usb_ep *ep, int buffer_size)
 		return NULL;
 
 	/* now allocate buffers for the requests */
-#ifdef CONFIG_PXA910_1G_DDR_WORKAROUND
-	req->buf = kmalloc(buffer_size, GFP_KERNEL | GFP_DMA);
-#else
 	req->buf = kmalloc(buffer_size, GFP_KERNEL);
-#endif
 	if (!req->buf) {
 		usb_ep_free_request(ep, req);
 		return NULL;
@@ -332,8 +328,8 @@ requeue_req:
 	if (ret < 0) {
 		pr_debug("adb_read: failed to queue req %p (%d)\n", req, ret);
 		r = -EIO;
-				atomic_set(&dev->error, 1);
-				adb_req_put(dev, &dev->rx_idle, req);
+		atomic_set(&dev->error, 1);
+		adb_req_put(dev, &dev->rx_idle, req);
 		goto done;
 	} else {
 		pr_debug("rx %p queue\n", req);
@@ -377,15 +373,6 @@ requeue_req:
 			dev->rx_req = req;
 			dev->read_count = req->actual;
 			dev->read_buf = req->buf;
-		
-#if 1
-		 pr_debug("Command = %s\n",  strncmp( req->buf, "CLSE",4) == 0 ? "CLSE" : 
-		 								strncmp( req->buf, "OKAY",4) == 0 ? "OKAY" :
-		 								strncmp( req->buf, "OPEN",4) == 0 ? "OPEN" :
-		 								strncmp( req->buf, "SYNC",4) == 0 ? "SYNC" :
-		 								strncmp( req->buf, "CNXN",4) == 0 ? "CNXN" :
-		 								strncmp( req->buf, "WRTE",4) == 0 ? "WRTE" : "????");
-#endif
 		}
 
 		if (ret < 0) {
@@ -438,14 +425,6 @@ static ssize_t adb_write(struct file *fp, const char __user *buf,
 				xfer = ADB_BULK_BUFFER_SIZE;
 			else
 				xfer = count;
-#if 1
-			pr_debug("Command = %s\n",  strncmp( buf, "CLSE",4) == 0 ? "CLSE" : 
-										   strncmp( buf, "OKAY",4) == 0 ? "OKAY" :
-										   strncmp( buf, "OPEN",4) == 0 ? "OPEN" :
-										   strncmp( buf, "SYNC",4) == 0 ? "SYNC" :
-										   strncmp( buf, "CNXN",4) == 0 ? "CNXN" :
-										   strncmp( buf, "WRTE",4) == 0 ? "WRTE" : "????");
-#endif			
 			if (copy_from_user(req->buf, buf, xfer)) {
 				r = -EFAULT;
 				break;
@@ -705,4 +684,3 @@ static void adb_cleanup(void)
 	kfree(_adb_dev);
 	_adb_dev = NULL;
 }
-

@@ -295,6 +295,12 @@ struct sync_fence *sync_fence_create(const char *name, struct sync_pt *pt)
 	list_add(&pt->pt_list, &fence->pt_list_head);
 	sync_pt_activate(pt);
 
+	/*
+	 * signal the fence in case pt was activated before
+	 * sync_pt_activate(pt) was called
+	 */
+	sync_fence_signal_pt(pt);
+
 	return fence;
 }
 EXPORT_SYMBOL(sync_fence_create);
@@ -456,7 +462,13 @@ struct sync_fence *sync_fence_merge(const char *name,
 	if (err < 0)
 		goto err;
 
-	fence->status = sync_fence_get_status(fence);
+	/*
+	 * signal the fence in case one of it's pts were activated before
+	 * they were activated
+	 */
+	sync_fence_signal_pt(list_first_entry(&fence->pt_list_head,
+					      struct sync_pt,
+					      pt_list));
 
 	return fence;
 err:
@@ -555,6 +567,16 @@ int sync_fence_cancel_async(struct sync_fence *fence,
 }
 EXPORT_SYMBOL(sync_fence_cancel_async);
 
+static bool sync_fence_check(struct sync_fence *fence)
+{
+	/*
+	 * Make sure that reads to fence->status are ordered with the
+	 * wait queue event triggering
+	 */
+	smp_rmb();
+	return fence->status != 0;
+}
+
 int sync_fence_wait(struct sync_fence *fence, long timeout)
 {
 	int err = 0;
@@ -562,17 +584,21 @@ int sync_fence_wait(struct sync_fence *fence, long timeout)
 	if (timeout > 0) {
 		timeout = msecs_to_jiffies(timeout);
 		err = wait_event_interruptible_timeout(fence->wq,
-						       fence->status != 0,
+						       sync_fence_check(fence),
 						       timeout);
 	} else if (timeout < 0) {
-		err = wait_event_interruptible(fence->wq, fence->status != 0);
+		err = wait_event_interruptible(fence->wq,
+					       sync_fence_check(fence));
 	}
 
 	if (err < 0)
 		return err;
 
-	if (fence->status < 0)
+	if (fence->status < 0) {
+		pr_info("fence error %d on [%p]\n", fence->status, fence);
+		sync_dump();
 		return fence->status;
+	}
 
 	if (fence->status == 0) {
 		pr_info("fence timeout on [%p] after %dms\n", fence,
@@ -625,6 +651,12 @@ static unsigned int sync_fence_poll(struct file *file, poll_table *wait)
 	struct sync_fence *fence = file->private_data;
 
 	poll_wait(file, &fence->wq, wait);
+
+	/*
+	 * Make sure that reads to fence->status are ordered with the
+	 * wait queue event triggering
+	 */
+	smp_rmb();
 
 	if (fence->status == 1)
 		return POLLIN;
@@ -814,7 +846,17 @@ static void sync_print_pt(struct seq_file *s, struct sync_pt *pt, bool fence)
 		seq_printf(s, "@%ld.%06ld", tv.tv_sec, tv.tv_usec);
 	}
 
-	if (pt->parent->ops->print_pt) {
+	if (pt->parent->ops->timeline_value_str &&
+	    pt->parent->ops->pt_value_str) {
+		char value[64];
+		pt->parent->ops->pt_value_str(pt, value, sizeof(value));
+		seq_printf(s, ": %s", value);
+		if (fence) {
+			pt->parent->ops->timeline_value_str(pt->parent, value,
+						    sizeof(value));
+			seq_printf(s, " / %s", value);
+		}
+	} else if (pt->parent->ops->print_pt) {
 		seq_printf(s, ": ");
 		pt->parent->ops->print_pt(s, pt);
 	}
@@ -829,7 +871,11 @@ static void sync_print_obj(struct seq_file *s, struct sync_timeline *obj)
 
 	seq_printf(s, "%s %s", obj->name, obj->ops->driver_name);
 
-	if (obj->ops->print_obj) {
+	if (obj->ops->timeline_value_str) {
+		char value[64];
+		obj->ops->timeline_value_str(obj, value, sizeof(value));
+		seq_printf(s, ": %s", value);
+	} else if (obj->ops->print_obj) {
 		seq_printf(s, ": ");
 		obj->ops->print_obj(s, obj);
 	}

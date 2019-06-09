@@ -404,6 +404,12 @@ static int rpm_suspend(struct device *dev, int rpmflags)
 		goto out;
 	}
 
+	if (__dev_pm_qos_read_value(dev) < 0) {
+		/* Negative PM QoS constraint means "never suspend". */
+		retval = -EPERM;
+		goto out;
+	}
+
 	__update_runtime_status(dev, RPM_SUSPENDING);
 
 	if (dev->pm_domain)

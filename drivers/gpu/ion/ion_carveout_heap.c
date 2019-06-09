@@ -125,16 +125,13 @@ struct sg_table *ion_carveout_heap_map_dma(struct ion_heap *heap,
 	table = kzalloc(sizeof(struct sg_table), GFP_KERNEL);
 	if (!table)
 		return ERR_PTR(-ENOMEM);
-
 	ret = sg_alloc_table(table, 1, GFP_KERNEL);
 	if (ret) {
 		kfree(table);
 		return ERR_PTR(ret);
 	}
-
-	sg = table->sgl;
-	sg_set_page(sg, page, buffer->size, 0);
-
+	sg_set_page(table->sgl, phys_to_page(buffer->priv_phys), buffer->size,
+		    0);
 	return table;
 }
 

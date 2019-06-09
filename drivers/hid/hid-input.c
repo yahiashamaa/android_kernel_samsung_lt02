@@ -1147,6 +1147,10 @@ int hidinput_connect(struct hid_device *hid, unsigned int force)
 			hid->driver->input_register(hid, hidinput))
 		goto out_cleanup;
 
+	if (hidinput && hid->driver->input_register &&
+			hid->driver->input_register(hid, hidinput))
+		goto out_cleanup;
+
 	if (hidinput && input_register_device(hidinput->input))
 		goto out_cleanup;
 

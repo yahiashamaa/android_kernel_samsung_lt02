@@ -101,6 +101,21 @@ static int sw_sync_fill_driver_data(struct sync_pt *sync_pt,
 	return sizeof(pt->value);
 }
 
+static void sw_sync_timeline_value_str(struct sync_timeline *sync_timeline,
+				       char *str, int size)
+{
+	struct sw_sync_timeline *timeline =
+		(struct sw_sync_timeline *)sync_timeline;
+	snprintf(str, size, "%d", timeline->value);
+}
+
+static void sw_sync_pt_value_str(struct sync_pt *sync_pt,
+				       char *str, int size)
+{
+	struct sw_sync_pt *pt = (struct sw_sync_pt *)sync_pt;
+	snprintf(str, size, "%d", pt->value);
+}
+
 struct sync_timeline_ops sw_sync_timeline_ops = {
 	.driver_name = "sw_sync",
 	.dup = sw_sync_pt_dup,
@@ -109,6 +124,9 @@ struct sync_timeline_ops sw_sync_timeline_ops = {
 	.print_obj = sw_sync_print_obj,
 	.print_pt = sw_sync_print_pt,
 	.fill_driver_data = sw_sync_fill_driver_data,
+	.fill_driver_data = sw_sync_fill_driver_data,
+	.timeline_value_str = sw_sync_timeline_value_str,
+	.pt_value_str = sw_sync_pt_value_str,
 };
 
 
