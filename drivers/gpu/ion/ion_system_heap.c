@@ -99,6 +99,17 @@ static void free_buffer_page(struct ion_system_heap *heap,
 
 	if (!cached) {
 		struct ion_page_pool *pool = heap->pools[order_to_index(order)];
+		/* zero the pages before returning them to the pool for
+		   security.  This uses vmap as we want to set the pgprot so
+		   the writes to occur to noncached mappings, as the pool's
+		   purpose is to keep the pages out of the cache */
+		for (i = 0; i < order / PAGE_SIZE; i++) {
+			struct page *sub_page = page + i;
+			void *addr = vmap(&sub_page, 1, VM_MAP,
+					  pgprot_writecombine(PAGE_KERNEL));
+			memset(addr, 0, PAGE_SIZE);
+			vunmap(addr);
+		}
 		ion_page_pool_free(pool, page);
 	} else if (split_pages) {
 		for (i = 0; i < (1 << order); i++)
@@ -213,20 +224,13 @@ void ion_system_heap_free(struct ion_buffer *buffer)
 	struct ion_system_heap *sys_heap = container_of(heap,
 							struct ion_system_heap,
 							heap);
-	struct sg_table *table = buffer->sg_table;
-	bool cached = ion_buffer_cached(buffer);
+	struct sg_table *table = buffer->priv_virt;
 	struct scatterlist *sg;
 	LIST_HEAD(pages);
 	int i;
 
-	/* uncached pages come from the page pools, zero them before returning
-	   for security purposes (other allocations are zerod at alloc time */
-	if (!cached)
-		ion_heap_buffer_zero(buffer);
-
 	for_each_sg(table->sgl, sg, table->nents, i)
-		free_buffer_page(sys_heap, buffer, sg_page(sg),
-				get_order(sg_dma_len(sg)));
+		free_buffer_page(sys_heap, buffer, sg_page(sg), get_order(sg_dma_len(sg)));
 	sg_free_table(table);
 	kfree(table);
 }
@@ -243,59 +247,78 @@ void ion_system_heap_unmap_dma(struct ion_heap *heap,
 	return;
 }
 
+void *ion_system_heap_map_kernel(struct ion_heap *heap,
+				 struct ion_buffer *buffer)
+{
+	struct scatterlist *sg;
+	int i, j;
+	void *vaddr;
+	pgprot_t pgprot;
+	struct sg_table *table = buffer->priv_virt;
+	int npages = PAGE_ALIGN(buffer->size) / PAGE_SIZE;
+	struct page **pages = vmalloc(sizeof(struct page *) * npages);
+	struct page **tmp = pages;
+
+	if (!pages)
+		return 0;
+
+	if (buffer->flags & ION_FLAG_CACHED)
+		pgprot = PAGE_KERNEL;
+	else
+		pgprot = pgprot_writecombine(PAGE_KERNEL);
+
+	for_each_sg(table->sgl, sg, table->nents, i) {
+		int npages_this_entry = PAGE_ALIGN(sg_dma_len(sg)) / PAGE_SIZE;
+		struct page *page = sg_page(sg);
+		BUG_ON(i >= npages);
+		for (j = 0; j < npages_this_entry; j++) {
+			*(tmp++) = page++;
+		}
+	}
+	vaddr = vmap(pages, npages, VM_MAP, pgprot);
+	vfree(pages);
+
+	return vaddr;
+}
+
+void ion_system_heap_unmap_kernel(struct ion_heap *heap,
+				  struct ion_buffer *buffer)
+{
+	vunmap(buffer->vaddr);
+}
+
+int ion_system_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
+			     struct vm_area_struct *vma)
+{
+	struct sg_table *table = buffer->priv_virt;
+	unsigned long addr = vma->vm_start;
+	unsigned long offset = vma->vm_pgoff;
+	struct scatterlist *sg;
+	int i;
+
+	for_each_sg(table->sgl, sg, table->nents, i) {
+		if (offset) {
+			offset--;
+			continue;
+		}
+		remap_pfn_range(vma, addr, page_to_pfn(sg_page(sg)),
+				sg_dma_len(sg), vma->vm_page_prot);
+		addr += sg_dma_len(sg);
+		if (addr >= vma->vm_end)
+			return 0;
+	}
+	return 0;
+}
+
 static struct ion_heap_ops system_heap_ops = {
 	.allocate = ion_system_heap_allocate,
 	.free = ion_system_heap_free,
 	.map_dma = ion_system_heap_map_dma,
 	.unmap_dma = ion_system_heap_unmap_dma,
-	.map_kernel = ion_heap_map_kernel,
-	.unmap_kernel = ion_heap_unmap_kernel,
-	.map_user = ion_heap_map_user,
+	.map_kernel = ion_system_heap_map_kernel,
+	.unmap_kernel = ion_system_heap_unmap_kernel,
+	.map_user = ion_system_heap_map_user,
 };
-
-static int ion_system_heap_shrink(struct shrinker *shrinker,
-				  struct shrink_control *sc) {
-
-	struct ion_heap *heap = container_of(shrinker, struct ion_heap,
-					     shrinker);
-	struct ion_system_heap *sys_heap = container_of(heap,
-							struct ion_system_heap,
-							heap);
-	int nr_total = 0;
-	int nr_freed = 0;
-	int i;
-
-	if (sc->nr_to_scan == 0)
-		goto end;
-
-	/* shrink the free list first, no point in zeroing the memory if
-	   we're just going to reclaim it */
-	nr_freed += ion_heap_freelist_drain(heap, sc->nr_to_scan * PAGE_SIZE) /
-		PAGE_SIZE;
-
-	if (nr_freed >= sc->nr_to_scan)
-		goto end;
-
-	for (i = 0; i < num_orders; i++) {
-		struct ion_page_pool *pool = sys_heap->pools[i];
-
-		nr_freed += ion_page_pool_shrink(pool, sc->gfp_mask,
-						 sc->nr_to_scan);
-		if (nr_freed >= sc->nr_to_scan)
-			break;
-	}
-
-end:
-	/* total number of items is whatever the page pools are holding
-	   plus whatever's in the freelist */
-	for (i = 0; i < num_orders; i++) {
-		struct ion_page_pool *pool = sys_heap->pools[i];
-		nr_total += ion_page_pool_shrink(pool, sc->gfp_mask, 0);
-	}
-	nr_total += ion_heap_freelist_size(heap) / PAGE_SIZE;
-	return nr_total;
-
-}
 
 static int ion_system_heap_debug_show(struct ion_heap *heap, struct seq_file *s,
 				      void *unused)
@@ -327,7 +350,6 @@ struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused)
 		return ERR_PTR(-ENOMEM);
 	heap->heap.ops = &system_heap_ops;
 	heap->heap.type = ION_HEAP_TYPE_SYSTEM;
-	heap->heap.flags = ION_HEAP_FLAG_DEFER_FREE;
 	heap->pools = kzalloc(sizeof(struct ion_page_pool *) * num_orders,
 			      GFP_KERNEL);
 	if (!heap->pools)
@@ -343,11 +365,6 @@ struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused)
 			goto err_create_pool;
 		heap->pools[i] = pool;
 	}
-
-	heap->heap.shrinker.shrink = ion_system_heap_shrink;
-	heap->heap.shrinker.seeks = DEFAULT_SEEKS;
-	heap->heap.shrinker.batch = 0;
-	register_shrinker(&heap->heap.shrinker);
 	heap->heap.debug_show = ion_system_heap_debug_show;
 	return &heap->heap;
 err_create_pool:
@@ -442,8 +459,8 @@ static struct ion_heap_ops kmalloc_ops = {
 	.phys = ion_system_contig_heap_phys,
 	.map_dma = ion_system_contig_heap_map_dma,
 	.unmap_dma = ion_system_contig_heap_unmap_dma,
-	.map_kernel = ion_heap_map_kernel,
-	.unmap_kernel = ion_heap_unmap_kernel,
+	.map_kernel = ion_system_heap_map_kernel,
+	.unmap_kernel = ion_system_heap_unmap_kernel,
 	.map_user = ion_system_contig_heap_map_user,
 };
 
