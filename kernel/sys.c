@@ -422,78 +422,79 @@ void kernel_restart(char *cmd)
 	
 	kernel_restart_prepare(cmd);
 
-	if (!(cmd && !strcmp(cmd,"panic")))	
-      {
 #if defined (CONFIG_MFD_88PM800)
-	if (cmd && (0 == strcmp(cmd, "recovery"))) 
+	if (!(cmd && !strcmp(cmd,"panic")))
 	{
-		printk("Enter recovery mode\n");
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FULL_RESET);
-	} 
-	else if (cmd && (0 == strcmp(cmd, "arm11_fota"))) 
-	{
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FOTA);
-		printk("Enter arm11_fota mode\n");
-	}
-	else if (cmd && (0 == strcmp(cmd, "alarm"))) 
-	{
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_RTC_ALARM);
-		printk("Enter alarm mode\n");
-	}
-	else if (cmd && (0 == strncmp(cmd, "debug",5))) 
-	{
-		if(cmd && (0 == strcmp(cmd, "debug0x4f4c"))) 
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_LOW);
+		if (cmd && (0 == strcmp(cmd, "recovery"))) 
+		{
+			printk("Enter recovery mode\n");
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FULL_RESET);
+		} 
+		else if (cmd && (0 == strcmp(cmd, "arm11_fota"))) 
+		{
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_FOTA);
+			printk("Enter arm11_fota mode\n");
+		}
+		else if (cmd && (0 == strcmp(cmd, "alarm"))) 
+		{
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_RTC_ALARM);
+			printk("Enter alarm mode\n");
+		}
+		else if (cmd && (0 == strncmp(cmd, "debug",5))) 
+		{
+			if(cmd && (0 == strcmp(cmd, "debug0x4f4c"))) 
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_LOW);
 
-		if(cmd && (0 == strcmp(cmd, "debug0x494d"))) 
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_MID);
+			if(cmd && (0 == strcmp(cmd, "debug0x494d"))) 
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_MID);
 
-		if(cmd && (0 == strcmp(cmd, "debug0x4948"))) 
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_HIGH);
+			if(cmd && (0 == strcmp(cmd, "debug0x4948"))) 
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_DEBUGLEVEL_HIGH);
 
-		printk("Enter debug setting mode\n");
-	}
-	else if ((cmd == NULL) || (0 == strcmp(cmd, "GlobalActions restart")) )
-	{
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
-		printk("Enter intended reset mode\n");
-	}
-	else
-	{
-		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
-		printk("Enter hw reset mode\n");
+			printk("Enter debug setting mode\n");
+		}
+		else if ((cmd == NULL) || (0 == strcmp(cmd, "GlobalActions restart")) )
+		{
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
+			printk("Enter intended reset mode\n");
+		}
+		else
+		{
+			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA3, PMIC_GENERAL_USE_BOOT_BY_INTENDED_RESET);
+			printk("Enter hw reset mode\n");
+		}
 	}
 #endif
-     }
+
 #ifdef CONFIG_CPU_PXA988
-		if(cmd && (0==strcmp(cmd,"download"))){
-			pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_FUS;
-			pmic_register =(pmic_download_register<<4)&0xF0;
-			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
-			
-			printk(KERN_EMERG "pmic_download_register FUS : %d \n",pmic_download_register);
-		}
-		else if (cmd && (0==strncmp(cmd,"sud", 3))){
-			suddlmod_number = *(cmd+3); //0x38
-			switch(suddlmod_number){				
-				case 0x31: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD1; break;
-				case 0x32: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD2; break;
-				case 0x33: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD3; break;
-				case 0x34: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD4; break;
-				case 0x35: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD5; break;
-				case 0x36: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD6; break;
-				case 0x37: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD7; break;
-				case 0x38: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD8; break;
-				case 0x39: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD9; break;
-				default : pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_NONE; break;
-			}
-			pmic_register =(pmic_download_register<<4)&0xF0;
-			pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
-			printk(KERN_EMERG "pmic_download_register SUDDLMOD : %d \n",pmic_download_register);
-		}
+	if(cmd && (0==strcmp(cmd,"download"))){
+		pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_FUS;
+		pmic_register =(pmic_download_register<<4)&0xF0;
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
 		
+		printk(KERN_EMERG "pmic_download_register FUS : %d \n",pmic_download_register);
+	}
+	else if (cmd && (0==strncmp(cmd,"sud", 3))){
+		suddlmod_number = *(cmd+3); //0x38
+		switch(suddlmod_number){				
+			case 0x31: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD1; break;
+			case 0x32: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD2; break;
+			case 0x33: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD3; break;
+			case 0x34: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD4; break;
+			case 0x35: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD5; break;
+			case 0x36: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD6; break;
+			case 0x37: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD7; break;
+			case 0x38: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD8; break;
+			case 0x39: pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_SUD9; break;
+			default : pmic_download_register = PMIC_GENERAL_DOWNLOAD_MODE_NONE; break;
+		}
+		pmic_register =(pmic_download_register<<4)&0xF0;
+		pm800_extern_write(PM80X_BASE_PAGE, PM800_USER_DATA6, pmic_register);
+		printk(KERN_EMERG "pmic_download_register SUDDLMOD : %d \n",pmic_download_register);
+	}	
 #endif		
 
+	disable_nonboot_cpus();
 	if (!cmd)
 		printk(KERN_EMERG "Restarting system.\n");
 	else
@@ -1375,7 +1376,7 @@ static int override_release(char __user *release, size_t len)
 			rest++;
 		}
 		v = ((LINUX_VERSION_CODE >> 8) & 0xff) + 40;
-		copy = min(sizeof(buf), max_t(size_t, 1, len));
+		copy = clamp_t(size_t, len, 1, sizeof(buf));
 		copy = scnprintf(buf, copy, "2.6.%u%s", v, rest);
 		ret = copy_to_user(release, buf, copy + 1);
 	}

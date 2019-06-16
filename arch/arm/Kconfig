@@ -582,6 +582,7 @@ config ARCH_KIRKWOOD
 	bool "Marvell Kirkwood"
 	select CPU_FEROCEON
 	select PCI
+	select PCI_QUIRKS
 	select ARCH_REQUIRE_GPIOLIB
 	select GENERIC_CLOCKEVENTS
 	select NEED_MACH_IO_H
@@ -1413,26 +1414,15 @@ config PL310_ERRATA_769419
 	  on systems with an outer cache, the store buffer is drained
 	  explicitly.
 
-config PJ4B_ERRATA_6315
-       bool "PJ4B errata 6315"
-       depends on CPU_PJ4B
+config ARM_ERRATA_775420
+       bool "ARM errata: A data cache maintenance operation which aborts, might lead to deadlock"
+       depends on CPU_V7
        help
-	  Replace DMB w. DSB when its necessary to enforce an ordering between an
-	  explicit load/store op and a set/way op.
-
-config PJ4B_ERRATA_6359
-	bool "PJ4B errata 6359"
-	depends on CPU_PJ4B
-	help
-	  Boradcast DMB operations do not fully synchronize local cache hits. This option
-	  replaces all occurences of DMB with DSB.
-
-config PJ4B_ERRATA_6409
-	bool "PJ4B errata 6409"
-	depends on CPU_PJ4B
-	help
-	  IFU predicts-taken a branch, but tells ROB not-taken. This option disable static
-	  branch prediction
+	 This option enables the workaround for the 775420 Cortex-A9 (r2p2,
+	 r2p6,r2p8,r2p10,r3p0) erratum. In case a date cache maintenance
+	 operation aborts with MMU exception, it might cause the processor
+	 to deadlock. This workaround puts DSB before executing ISB if
+	 an abort may occur on cache maintenance.
 
 endmenu
 
@@ -2174,6 +2164,7 @@ source "drivers/cpufreq/Kconfig"
 config CPU_FREQ_IMX
 	tristate "CPUfreq driver for i.MX CPUs"
 	depends on ARCH_MXC && CPU_FREQ
+	select CPU_FREQ_TABLE
 	help
 	  This enables the CPUfreq driver for i.MX CPUs.
 
