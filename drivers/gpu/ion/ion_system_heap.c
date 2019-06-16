@@ -99,17 +99,6 @@ static void free_buffer_page(struct ion_system_heap *heap,
 
 	if (!cached) {
 		struct ion_page_pool *pool = heap->pools[order_to_index(order)];
-		/* zero the pages before returning them to the pool for
-		   security.  This uses vmap as we want to set the pgprot so
-		   the writes to occur to noncached mappings, as the pool's
-		   purpose is to keep the pages out of the cache */
-		for (i = 0; i < (1 << order); i++) {
-			struct page *sub_page = page + i;
-			void *addr = vmap(&sub_page, 1, VM_MAP,
-					  pgprot_writecombine(PAGE_KERNEL));
-			memset(addr, 0, PAGE_SIZE);
-			vunmap(addr);
-		}
 		ion_page_pool_free(pool, page);
 	} else if (split_pages) {
 		for (i = 0; i < (1 << order); i++)
@@ -225,12 +214,19 @@ void ion_system_heap_free(struct ion_buffer *buffer)
 							struct ion_system_heap,
 							heap);
 	struct sg_table *table = buffer->sg_table;
+	bool cached = ion_buffer_cached(buffer);
 	struct scatterlist *sg;
 	LIST_HEAD(pages);
 	int i;
 
+	/* uncached pages come from the page pools, zero them before returning
+	   for security purposes (other allocations are zerod at alloc time */
+	if (!cached)
+		ion_heap_buffer_zero(buffer);
+
 	for_each_sg(table->sgl, sg, table->nents, i)
-		free_buffer_page(sys_heap, buffer, sg_page(sg), get_order(sg_dma_len(sg)));
+		free_buffer_page(sys_heap, buffer, sg_page(sg),
+				get_order(sg_dma_len(sg)));
 	sg_free_table(table);
 	kfree(table);
 }
