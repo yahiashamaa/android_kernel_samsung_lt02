@@ -1,4 +1,5 @@
 /*
+
  * drivers/gpu/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
@@ -1583,44 +1584,6 @@ static int ion_shrink(struct ion_heap *heap, int kill_adj)
 	return -EAGAIN;
 }
 
-#ifdef DEBUG_HEAP_SHRINKER
-static int debug_shrink_set(void *data, u64 val)
-{
-	struct ion_heap *heap = data;
-	struct shrink_control sc;
-	int objs;
-
-	sc.gfp_mask = -1;
-	sc.nr_to_scan = 0;
-
-	if (!val)
-		return 0;
-
-	objs = heap->shrinker.shrink(&heap->shrinker, &sc);
-	sc.nr_to_scan = objs;
-
-	heap->shrinker.shrink(&heap->shrinker, &sc);
-	return 0;
-}
-
-static int debug_shrink_get(void *data, u64 *val)
-{
-	struct ion_heap *heap = data;
-	struct shrink_control sc;
-	int objs;
-
-	sc.gfp_mask = -1;
-	sc.nr_to_scan = 0;
-
-	objs = heap->shrinker.shrink(&heap->shrinker, &sc);
-	*val = objs;
-	return 0;
-}
-
-DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
-			debug_shrink_set, "%llu\n");
-#endif
-
 void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 {
 	if (!heap->ops->allocate || !heap->ops->free || !heap->ops->map_dma ||
@@ -1639,15 +1602,6 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 	plist_add(&heap->node, &dev->heaps);
 	debugfs_create_file(heap->name, 0664, dev->debug_root, heap,
 			    &debug_heap_fops);
-#ifdef DEBUG_HEAP_SHRINKER
-	if (heap->shrinker.shrink) {
-		char debug_name[64];
-
-		snprintf(debug_name, 64, "%s_shrink", heap->name);
-		debugfs_create_file(debug_name, 0644, dev->debug_root, heap,
-				    &debug_shrink_fops);
-	}
-#endif
 	up_write(&dev->lock);
 }
 
@@ -1708,7 +1662,8 @@ void __init ion_reserve(struct ion_platform_data *data)
 						    data->heaps[i].align,
 						    MEMBLOCK_ALLOC_ANYWHERE);
 			if (!paddr) {
-				pr_err("%s: error allocating memblock for heap %d\n",
+				pr_err("%s: error allocating memblock for "
+				       "heap %d\n",
 					__func__, i);
 				continue;
 			}
