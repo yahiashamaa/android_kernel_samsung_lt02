@@ -60,4 +60,3 @@ obj-$(CONFIG_FUELGAUGE_STC3115) += stc3115_configsecure.o
 obj-$(CONFIG_STC3115_FUELGAUGE) += stc3115_battery.o
 obj-$(CONFIG_MAX17043_FUELGAUGE) += max17043_fuelgauge.o
 obj-$(CONFIG_BQ27425_FUELGAUGE) += bq27425_fuelgauge.o
-

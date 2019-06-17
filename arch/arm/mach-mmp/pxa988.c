@@ -348,22 +348,24 @@ static void pxa988_ram_console_init(void)
 #endif
 
 #ifdef CONFIG_ION
+static struct ion_platform_heap ion_data_heap[] = {
+	{
+		.type	= ION_HEAP_TYPE_CARVEOUT,
+		.id	= ION_HEAP_TYPE_CARVEOUT,
+		.name	= "carveout_heap",
+		.size   = 0x01000000,
+		.base   = 0x09000000,
+	},
+	{
+		.type	= ION_HEAP_TYPE_SYSTEM,
+		.id	= ION_HEAP_TYPE_SYSTEM,
+		.name	= "system_heap",
+	}
+};
+
 static struct ion_platform_data ion_data = {
 	.nr	= 2,
-	.heaps	= {
-		[0] = {
-			.type	= ION_HEAP_TYPE_CARVEOUT,
-			.id	= ION_HEAP_TYPE_CARVEOUT,
-			.name	= "carveout_heap",
-			.size   = 0x01000000,
-			.base   = 0x09000000,
-		},
-		[1] = {
-			.type	= ION_HEAP_TYPE_SYSTEM,
-			.id	= ION_HEAP_TYPE_SYSTEM,
-			.name	= "system_heap",
-		},
-	},
+	.heaps	= ion_data_heap,
 };
 
 struct platform_device device_ion = {
