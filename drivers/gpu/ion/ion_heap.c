@@ -146,7 +146,7 @@ void ion_heap_free_page(struct ion_buffer *buffer, struct page *page,
 		__free_page(page + i);
 }
 
-void ion_heap_freelist_add(struct ion_heap *heap, struct ion_buffer *buffer)
+void ion_heap_freelist_add(struct ion_heap *heap, struct ion_buffer * buffer)
 {
 	rt_mutex_lock(&heap->lock);
 	list_add(&buffer->list, &heap->free_list);
@@ -181,10 +181,10 @@ size_t ion_heap_freelist_drain(struct ion_heap *heap, size_t size)
 	list_for_each_entry_safe(buffer, tmp, &heap->free_list, list) {
 		if (total_drained >= size)
 			break;
-		heap->free_list_size -= buffer->size;
-		total_drained += buffer->size;
 		list_del(&buffer->list);
 		ion_buffer_destroy(buffer);
+		heap->free_list_size -= buffer->size;
+		total_drained += buffer->size;
 	}
 	rt_mutex_unlock(&heap->lock);
 

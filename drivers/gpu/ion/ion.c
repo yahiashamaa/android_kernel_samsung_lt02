@@ -29,7 +29,6 @@
 #include <linux/mm.h>
 #include <linux/mm_types.h>
 #include <linux/rbtree.h>
-#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
 #include <linux/uaccess.h>
@@ -245,16 +244,6 @@ err2:
 
 void ion_buffer_destroy(struct ion_buffer *buffer)
 {
-	struct ion_vma_list *vma_list, *tmp;
-
-	/* remove the vmas that won't be used */
-	mutex_lock(&buffer->lock);
-	list_for_each_entry_safe(vma_list, tmp, &buffer->vmas, list) {
-		list_del(&vma_list->list);
-		kfree(vma_list);
-	}
-	mutex_unlock(&buffer->lock);
-
 	if (WARN_ON(buffer->kmap_cnt > 0))
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
 	buffer->heap->ops->unmap_dma(buffer->heap, buffer);
@@ -1584,6 +1573,44 @@ static int ion_shrink(struct ion_heap *heap, int kill_adj)
 	return -EAGAIN;
 }
 
+#ifdef DEBUG_HEAP_SHRINKER
+static int debug_shrink_set(void *data, u64 val)
+{
+        struct ion_heap *heap = data;
+        struct shrink_control sc;
+        int objs;
+
+        sc.gfp_mask = -1;
+        sc.nr_to_scan = 0;
+
+        if (!val)
+                return 0;
+
+        objs = heap->shrinker.shrink(&heap->shrinker, &sc);
+        sc.nr_to_scan = objs;
+
+        heap->shrinker.shrink(&heap->shrinker, &sc);
+        return 0;
+}
+
+static int debug_shrink_get(void *data, u64 *val)
+{
+        struct ion_heap *heap = data;
+        struct shrink_control sc;
+        int objs;
+
+        sc.gfp_mask = -1;
+        sc.nr_to_scan = 0;
+
+        objs = heap->shrinker.shrink(&heap->shrinker, &sc);
+        *val = objs;
+        return 0;
+}
+
+DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
+                        debug_shrink_set, "%llu\n");
+#endif
+
 void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 {
 	if (!heap->ops->allocate || !heap->ops->free || !heap->ops->map_dma ||
@@ -1602,6 +1629,15 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 	plist_add(&heap->node, &dev->heaps);
 	debugfs_create_file(heap->name, 0664, dev->debug_root, heap,
 			    &debug_heap_fops);
+#ifdef DEBUG_HEAP_SHRINKER
+	if (heap->shrinker.shrink) {
+		char debug_name[64];
+
+		snprintf(debug_name, 64, "%s_shrink", heap->name);
+		debugfs_create_file(debug_name, 0644, dev->debug_root, heap,
+				    &debug_shrink_fops);
+	}
+#endif
 	up_write(&dev->lock);
 }
 
