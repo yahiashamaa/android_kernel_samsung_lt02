@@ -428,7 +428,7 @@ config CRYPTO_SHA1_ARM
 	depends on ARM
 	select CRYPTO_SHA1
 	select CRYPTO_HASH
-	  help
+	help
 	  SHA-1 secure hash standard (FIPS 180-1/DFIPS 180-2) implemented
 	  using optimized ARM assembler.
 
