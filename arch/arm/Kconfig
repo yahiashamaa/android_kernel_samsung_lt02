@@ -2329,7 +2329,15 @@ config NEON
 config GPU_RESERVE_MEM
 	bool "GC video memory allocator"
 	help
-		reserve memory for GC as video memory
+	  reserve memory for GC as video memory
+
+config KERNEL_MODE_NEON
+	bool "Support for NEON in kernel mode"
+	default n
+	depends on NEON
+	help
+	  Say Y to include support for NEON in kernel mode.
+
 endmenu
 
 menu "Userspace binary formats"
