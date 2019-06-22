@@ -656,8 +656,9 @@ static int uio_mmap_physical(struct vm_area_struct *vma)
 		return -EINVAL;
 	mem = idev->info->mem + mi;
 
-	if (vma->vm_end - vma->vm_start > mem->size)
-		return -EINVAL;
+	// This is causing Images capturing to break.
+	// if (vma->vm_end - vma->vm_start > mem->size)
+	// 	return -EINVAL;
 
 	vma->vm_flags |= VM_IO | VM_RESERVED;
 
