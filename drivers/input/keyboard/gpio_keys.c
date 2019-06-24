@@ -57,7 +57,6 @@ static bool g_bVolUp;
 static bool g_bPower;
 static bool g_bHome;
 static struct timer_list debug_timer;
-extern void dump_all_task_info();
 #endif
 
 struct gpio_button_data {
@@ -369,8 +368,6 @@ void enter_upload_mode(unsigned long val)
 {
 	if (g_bVolUp && jack_is_detected && g_bPower)
 		if (sec_debug_mode == DEBUG_LEVEL_MID || sec_debug_mode == DEBUG_LEVEL_HIGH) {
-			dump_all_task_info();
-			//dump_cpu_stat();
 			panic("__forced_upload");
 		}
 }

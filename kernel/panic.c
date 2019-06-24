@@ -322,8 +322,6 @@ void __weak panic_smp_self_stop(void)
  *	This function never returns.
  */
 #ifdef CONFIG_KERNEL_DEBUG_SEC
-extern void dump_all_task_info();
-extern void dump_cpu_stat();
 #endif
 
 #define SCU_CTRL                0x00
@@ -424,9 +422,7 @@ void panic(const char *fmt, ...)
 #endif
 
 #ifdef CONFIG_KERNEL_DEBUG_SEC
-//	dump_all_task_info();
 //	mdelay(500);
-//	dump_cpu_stat();
 #endif
 	/*
 	 * If we have crashed and we have a crash kernel loaded let it handle

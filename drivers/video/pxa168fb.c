@@ -2067,8 +2067,6 @@ void pxa168fb_update_modes(struct pxa168fb_info *fbi ,unsigned int index,unsigne
 
 }
 
-extern void sec_getlog_supply_fbinfo(struct fb_info *fb);
-
 static int __devinit pxa168fb_probe(struct platform_device *pdev)
 {
 	struct pxa168fb_mach_info *mi;
@@ -2344,8 +2342,6 @@ static int __devinit pxa168fb_probe(struct platform_device *pdev)
 		atomic_set(&fbi->vsync_cnt, 1);
 	else
 		atomic_set(&fbi->vsync_cnt, 2);
-
-	sec_getlog_supply_fbinfo(fbi->fb_info);
 	
 #ifdef CONFIG_PXA688_PHY
 	ret = device_create_file(&pdev->dev, &dev_attr_phy);
