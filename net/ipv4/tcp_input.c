@@ -68,6 +68,7 @@
 #include <linux/module.h>
 #include <linux/sysctl.h>
 #include <linux/kernel.h>
+#include <linux/reciprocal_div.h>
 #include <net/dst.h>
 #include <net/tcp.h>
 #include <net/inet_common.h>
@@ -3702,7 +3703,8 @@ static void tcp_send_challenge_ack(struct sock *sk)
 	/* unprotected vars, we dont care of overwrites */
 	static u32 challenge_timestamp;
 	static unsigned int challenge_count;
-	u32 count, now = jiffies / HZ;
+	u32 now = jiffies / HZ;
+	u32 count;
 
 	if (now != challenge_timestamp) {
 		u32 half = (sysctl_tcp_challenge_ack_limit + 1) >> 1;
