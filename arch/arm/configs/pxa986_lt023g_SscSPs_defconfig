@@ -2694,11 +2694,6 @@ CONFIG_DEBUG_LL_UART_NONE=y
 # CONFIG_EARLY_PRINTK is not set
 
 #
-# Samsung Rooting Restriction Feature
-#
-# CONFIG_SEC_RESTRICT_ROOTING is not set
-
-#
 # Security options
 #
 CONFIG_KEYS=y
