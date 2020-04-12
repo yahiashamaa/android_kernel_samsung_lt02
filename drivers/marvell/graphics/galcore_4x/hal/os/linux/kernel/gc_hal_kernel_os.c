@@ -9404,7 +9404,7 @@ gckOS_ResetGPU(
     return gcvSTATUS_NOT_SUPPORTED;
 }
 
-gceSTATUS inline
+gceSTATUS static inline
 _ToDisableClock(
     IN gckOS Os,
     IN gceCORE Core,
@@ -9460,7 +9460,7 @@ _ToDisableClock(
     return gcvSTATUS_OK;
 }
 
-gceSTATUS inline
+gceSTATUS static inline
 _ToEnableClock(
     IN gckOS Os,
     IN gceCORE Core,
@@ -9522,7 +9522,7 @@ _ToEnableClock(
     return gcvSTATUS_OK;
 }
 
-gceSTATUS inline
+gceSTATUS static inline
 _ToDisablePower(
     IN gckOS Os,
     IN gceCORE Core,
@@ -9578,7 +9578,7 @@ _ToDisablePower(
 }
 
 
-gceSTATUS inline
+gceSTATUS static inline
 _ToEnablePower(
     IN gckOS Os,
     IN gceCORE Core,
