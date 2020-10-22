@@ -192,8 +192,8 @@ SUBARCH := $(shell uname -m | sed -e s/i.86/i386/ -e s/sun4u/sparc64/ \
 # Default value for CROSS_COMPILE is not to prefix executables
 # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
 export KBUILD_BUILDHOST := $(SUBARCH)
-ARCH		?=arm
-CROSS_COMPILE	?=/opt/toolchains/arm-eabi-4.6/bin/arm-eabi-
+ARCH		?= $(SUBARCH)
+CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
 
 # Architecture as present in compile.h
 UTS_MACHINE 	:= $(ARCH)
@@ -691,8 +691,7 @@ export	INSTALL_PATH ?= /boot
 # makefile but the argument can be passed to make if needed.
 #
 
-#MODLIB	= $(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE)
-MODLIB = $(INSTALL_MOD_PATH)/lib/modules/
+MODLIB	= $(INSTALL_MOD_PATH)/lib/modules/$(KERNELRELEASE)
 export MODLIB
 
 #
@@ -1121,16 +1120,16 @@ modules_install: _modinst_ _modinst_post
 
 PHONY += _modinst_
 _modinst_:
-#	@rm -rf $(MODLIB)/kernel
-#	@rm -f $(MODLIB)/source
-#	@mkdir -p $(MODLIB)/kernel
-#	@ln -s $(srctree) $(MODLIB)/source
-#	@if [ ! $(objtree) -ef  $(MODLIB)/build ]; then \
-#		rm -f $(MODLIB)/build ; \
-#		ln -s $(objtree) $(MODLIB)/build ; \
-#	fi
-#	@cp -f $(objtree)/modules.order $(MODLIB)/
-#	@cp -f $(objtree)/modules.builtin $(MODLIB)/
+	@rm -rf $(MODLIB)/kernel
+	@rm -f $(MODLIB)/source
+	@mkdir -p $(MODLIB)/kernel
+	@ln -s $(srctree) $(MODLIB)/source
+	@if [ ! $(objtree) -ef  $(MODLIB)/build ]; then \
+		rm -f $(MODLIB)/build ; \
+		ln -s $(objtree) $(MODLIB)/build ; \
+	fi
+	@cp -f $(objtree)/modules.order $(MODLIB)/
+	@cp -f $(objtree)/modules.builtin $(MODLIB)/
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modinst
 
 # This depmod is only for convenience to give the initial
@@ -1139,7 +1138,7 @@ _modinst_:
 PHONY += _modinst_post
 _modinst_post: _modinst_
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.fwinst obj=firmware __fw_modinst
-#	$(call cmd,depmod)
+	$(call cmd,depmod)
 
 else # CONFIG_MODULES
 
