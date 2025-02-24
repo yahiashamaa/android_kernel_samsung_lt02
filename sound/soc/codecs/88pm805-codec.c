@@ -202,13 +202,12 @@ static int pm805_bulk_write_reg(struct snd_kcontrol *kcontrol,
 	int i, count = 0;
 	struct pm80x_chip *chip = (struct pm80x_chip *)codec->control_data;
 
-	//count = (ucontrol->value.integer.value[0] & 0xff);
-	count = PM805_MIXER_COEFFICIENT_MAX_NUM-1;
+	count = (ucontrol->value.integer.value[0] & 0xff);
 
-	//if (count < 1 || count > PM805_MIXER_COEFFICIENT_MAX_NUM) {
-	//	pr_info("error count %d, must between 1~32\n", count);
-	//	return -EINVAL;
-	//}
+	if (count < 1 || count > PM805_MIXER_COEFFICIENT_MAX_NUM) {
+		pr_info("error count %d, must between 1~32\n", count);
+		return -EINVAL;
+	}
 
 	pr_debug("%s: 0x%x, count %d\n", __func__, reg, count);
 
